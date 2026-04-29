@@ -23,8 +23,13 @@ function App() {
       })
       .subscribe()
 
+    const intervalId = setInterval(() => {
+      fetchData()
+    }, 60000) // Refrescar cada 1 minuto para evaluar heartbeats
+
     return () => {
       supabase.removeChannel(kioskSubscription)
+      clearInterval(intervalId)
     }
   }, [])
 
@@ -41,8 +46,23 @@ function App() {
         .order('offline_time', { ascending: false })
         .limit(30)
 
-      let finalKiosks = kiosksData || []
+      let rawKiosks = kiosksData || []
       let finalEvents = eventsData || []
+
+      // Lógica de Heartbeat (Latido)
+      // Si el equipo no ha reportado latido en más de 6 minutos, asumimos que está apagado
+      let finalKiosks = rawKiosks.map(kiosk => {
+        if (kiosk.status === 'online' && kiosk.last_heartbeat) {
+          const lastHeartbeatTime = new Date(kiosk.last_heartbeat).getTime()
+          const currentTime = new Date().getTime()
+          const minutesSince = (currentTime - lastHeartbeatTime) / 60000
+
+          if (minutesSince > 6) {
+            return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
+          }
+        }
+        return kiosk
+      })
 
       if (finalKiosks.length === 0) {
         finalKiosks = []

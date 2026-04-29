@@ -9,9 +9,10 @@
 # ============================================================================
 # CONFIGURACIÓN (Supabase)
 # ============================================================================
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ClientName = "Cencosud"
 $Location = "Mall Costanera Center" # NUEVO: Sucursal o Ubicación del equipo
-$KioskName = $env:COMPUTERNAME
+$KioskName = "NOMBRE_KIOSCO_AQUI"
 
 # Datos de tu proyecto Supabase (Obtén esto en Project Settings -> API)
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
@@ -190,16 +191,17 @@ Function Analyze-Fault {
 
 Function Check-Heartbeat {
     $now = Get-Date
-    if ($now.Hour -eq $HeartbeatHour) {
-        $lastHeartbeat = ""
-        if (Test-Path $HeartbeatFile) { $lastHeartbeat = Get-Content $HeartbeatFile }
-        $todayStr = $now.ToString("yyyy-MM-dd")
-        
-        if ($lastHeartbeat -ne $todayStr) {
-            Write-Output "Enviando Señal de Vida a Supabase..."
-            Update-KioskStatus -Status "online"
-            $todayStr | Set-Content $HeartbeatFile
-        }
+    $lastHeartbeatTime = $null
+    if (Test-Path $HeartbeatFile) { 
+        $fileContent = Get-Content $HeartbeatFile
+        try { $lastHeartbeatTime = [datetime]$fileContent } catch {}
+    }
+    
+    # Si no hay registro o han pasado 5 minutos o más
+    if (-not $lastHeartbeatTime -or ($now - $lastHeartbeatTime).TotalMinutes -ge 5) {
+        Write-Output "Enviando Latido (Heartbeat 5m) a Supabase..."
+        Update-KioskStatus -Status "online"
+        $now.ToString("yyyy-MM-dd HH:mm:ss") | Set-Content $HeartbeatFile
     }
 }
 
@@ -252,7 +254,7 @@ while ($true) {
     elseif ($pingSuccess -and -not $isOnline) {
         $isOnline = $true
         $recoveryTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        Write-Output "$recoveryTime: RED RESTABLECIDA. Procesando reporte..."
+        Write-Output "$($recoveryTime): RED RESTABLECIDA. Procesando reporte..."
         
         @{ Status = "ONLINE" } | ConvertTo-Json | Set-Content $StateFile
         
