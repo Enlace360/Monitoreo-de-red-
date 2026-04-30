@@ -276,6 +276,16 @@ body {
   box-shadow: 0 10px 20px rgba(255, 23, 68, 0.15);
 }
 
+.kiosk-card.degraded {
+  border-color: rgba(255, 145, 0, 0.4);
+  background: rgba(255, 145, 0, 0.05);
+}
+
+.kiosk-card.degraded:hover {
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: 0 10px 20px rgba(255, 145, 0, 0.15);
+}
+
 .status-indicator {
   width: 14px;
   height: 14px;
@@ -292,6 +302,12 @@ body {
   background: var(--status-offline);
   box-shadow: 0 0 15px var(--status-offline);
   animation: pulse-red 1.5s infinite;
+}
+
+.kiosk-card.degraded .status-indicator {
+  background: var(--status-warning);
+  box-shadow: 0 0 15px var(--status-warning);
+  animation: pulse-orange 1.5s infinite;
 }
 
 .kiosk-name {
@@ -528,4 +544,10 @@ body {
   0% { box-shadow: 0 0 0 0 rgba(255, 23, 68, 0.6); }
   70% { box-shadow: 0 0 0 12px rgba(255, 23, 68, 0); }
   100% { box-shadow: 0 0 0 0 rgba(255, 23, 68, 0); }
+}
+
+@keyframes pulse-orange {
+  0% { box-shadow: 0 0 0 0 rgba(255, 145, 0, 0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(255, 145, 0, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 145, 0, 0); }
 }

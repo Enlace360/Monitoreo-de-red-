@@ -87,6 +87,10 @@ function App() {
           if (minutesSince > 6) {
             return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
           }
+          
+          if (kiosk.latency_ms && kiosk.latency_ms > 500) {
+            return { ...kiosk, status: 'degraded', uptime: `${kiosk.latency_ms}ms (Lento)` }
+          }
         }
         return kiosk
       })
