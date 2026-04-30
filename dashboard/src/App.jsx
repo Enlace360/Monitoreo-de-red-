@@ -100,6 +100,19 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
     }
   }
 
+  const updateAllAgents = async () => {
+    if (!window.confirm(`¿Actualizar el agente en ${kiosks.length} kioscos? El cambio se aplicará automáticamente.`)) return
+    const updateCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Write-Output 'Descarga completada.'"
+    let sent = 0
+    for (const kiosk of kiosks) {
+      const { error } = await supabase
+        .from('remote_commands')
+        .insert([{ kiosk_id: kiosk.kiosk_id, command_string: updateCmd, status: 'pending' }])
+      if (!error) sent++
+    }
+    alert(`Comando de actualización enviado a ${sent}/${kiosks.length} kioscos.`)
+  }
+
   useEffect(() => {
     let interval;
     if (terminalKiosk) {
@@ -348,7 +361,17 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
 
       <div className="dashboard-layout">
         <main className="glass-panel main-panel">
-          <h2 className="panel-title"><Monitor size={22} color="var(--brand-cyan)" /> Flota de Kioscos</h2>
+          <h2 className="panel-title"><Monitor size={22} color="var(--brand-cyan)" /> Flota de Kioscos
+            <button
+              onClick={updateAllAgents}
+              style={{ marginLeft: 'auto', background: 'rgba(0,194,255,0.1)', border: '1px solid rgba(0,194,255,0.3)', color: 'var(--brand-cyan)', padding: '6px 14px', borderRadius: '8px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: '600', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px' }}
+              onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(0,194,255,0.25)' }}
+              onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(0,194,255,0.1)' }}
+              title="Enviar actualización de agente a todos los kioscos"
+            >
+              <Download size={14} /> Actualizar Todos
+            </button>
+          </h2>
 
           <div className="locations-container">
             {Object.entries(kiosksByLocation).map(([location, groupKiosks]) => (
@@ -617,7 +640,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter -Physical | Restart-NetAdapter')}>Reiniciar Red</button>
-                <button className="quick-cmd-btn" onClick={() => sendCommand("Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Write-Output 'Descarga completada. El agente detectara el cambio y se reiniciara automaticamente.'")}>Actualizar Agente</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand("[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Write-Output 'Descarga completada. El agente se reiniciara automaticamente.'")}>Actualizar Agente</button>
                 <button className="quick-cmd-btn danger" onClick={() => { if(window.confirm('¿Forzar reinicio del kiosco?')) sendCommand('Restart-Computer -Force') }}>Reiniciar PC</button>
               </div>
 

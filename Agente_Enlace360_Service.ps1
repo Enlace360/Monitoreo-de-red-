@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.3"
+$AgentVersion = "v3.4"
 
 $CheckIntervalSecs = 30      
 $LogDir = "C:\KioskNetMonitor"
@@ -109,25 +109,9 @@ Function Get-SystemUptime {
     } catch { return "Desconocido" }
 }
 
-Function Auto-UpdateFromGitHub {
-    $rawUrl = "https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1"
-    try {
-        $newCode = Invoke-RestMethod -Uri $rawUrl -UseBasicParsing -ErrorAction Stop
-        $currentCode = Get-Content $MyInvocation.MyCommand.Path -Raw
-        
-        if ($newCode.Length -eq $currentCode.Length -or $newCode -match "404: Not Found") { return }
-
-        $newCode | Set-Content $MyInvocation.MyCommand.Path -Force
-        Write-Log "[UPDATE] Auto-actualizacion instalada en disco. Aplicando parche en memoria..."
-        
-        # Lanza un proceso independiente que espera 2 segundos y reinicia la Tarea Programada del Agente
-        $restartCmd = "Start-Sleep -Seconds 2; Stop-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; Start-ScheduledTask -TaskName 'Enlace360_Agent'"
-        Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$restartCmd`""
-        
-        Write-Log "[UPDATE] Cerrando version antigua para dar paso a la nueva."
-        Exit # Terminamos el proceso actual, el proceso independiente lo volvera a levantar
-    } catch { }
-}
+# Auto-UpdateFromGitHub eliminada en v3.4.
+# La actualizacion ahora se gestiona via C2 (boton 'Actualizar Agente' en el Dashboard)
+# + deteccion automatica de cambios en disco via Check-SelfUpdate (hash MD5).
 
 # ============================================================================
 # FUNCIONES DE SUPABASE Y C2
@@ -352,7 +336,6 @@ Function Check-SelfUpdate {
     } catch {}
 }
 
-Auto-UpdateFromGitHub
 Update-KioskStatus -Status "online"
 
 $isOnline = $true
@@ -423,9 +406,29 @@ while ($true) {
             try {
                 $offlineStart = [datetime]$offlineData.Timestamp
                 if (((Get-Date) - $offlineStart).TotalHours -ge 1) {
-                    Write-Log "[CRITICO] Equipo desconectado por mas de 1 hora. Activando Protocolo Lazaro (Reinicio Forzado)..."
-                    Update-KioskStatus -Status "offline"
-                    Restart-Computer -Force
+                    # Verificar limite de reinicios Lazaro (max 3 por dia)
+                    $lazaroFile = Join-Path $LogDir "lazaro_count.txt"
+                    $lazaroCount = 0
+                    $lazaroDate = ""
+                    if (Test-Path $lazaroFile) {
+                        try {
+                            $lazData = Get-Content $lazaroFile -Raw | ConvertFrom-Json
+                            $lazaroDate = $lazData.Date
+                            $lazaroCount = [int]$lazData.Count
+                        } catch {}
+                    }
+                    $today = (Get-Date).ToString("yyyy-MM-dd")
+                    if ($lazaroDate -ne $today) { $lazaroCount = 0 }
+                    
+                    if ($lazaroCount -lt 3) {
+                        $lazaroCount++
+                        @{ Date = $today; Count = $lazaroCount } | ConvertTo-Json | Set-Content $lazaroFile
+                        Write-Log "[CRITICO] Protocolo Lazaro ($lazaroCount/3 hoy). Reinicio forzado..."
+                        Update-KioskStatus -Status "offline"
+                        Restart-Computer -Force
+                    } else {
+                        Write-Log "[CRITICO] Lazaro agotado (3/3 reinicios hoy). Esperando al dia siguiente."
+                    }
                 }
             } catch {}
         }
