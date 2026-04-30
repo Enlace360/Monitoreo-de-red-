@@ -26,7 +26,7 @@ if not exist "C:\KioskNetMonitor" mkdir "C:\KioskNetMonitor"
 echo       Hecho.
 
 echo [3/4] Descargando agente desde GitHub...
-powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\KioskNetMonitor\Agente_Enlace360_Service.ps1' -UseBasicParsing"
+powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\KioskNetMonitor\Agente_Enlace360_Service.ps1' -UseBasicParsing"
 echo       Hecho.
 
 set PS_SCRIPT=%TEMP%\Enlace360_Setup.ps1
