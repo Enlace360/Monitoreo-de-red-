@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
-import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin } from 'lucide-react'
+import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle } from 'lucide-react'
 import './index.css'
 
 function App() {
@@ -12,6 +12,33 @@ function App() {
   
   const [loading, setLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState(null)
+  const [showGlossary, setShowGlossary] = useState(false)
+
+  const exportToCSV = () => {
+    if (allEvents.length === 0) return;
+    const headers = ['Kiosco', 'Cliente', 'Sucursal', 'Causa Probable', 'Fecha Caída', 'Fecha Recuperación', 'Estado'];
+    const rows = allEvents.map(e => [
+      e.kiosk_id, 
+      e.client_name, 
+      e.location || 'Sede Principal', 
+      e.probable_cause, 
+      new Date(e.offline_time).toLocaleString(), 
+      e.online_time ? new Date(e.online_time).toLocaleString() : 'Aún Caído',
+      e.online_time ? 'Recuperado' : 'Crítico'
+    ]);
+    
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + headers.join(",") + "\n" 
+      + rows.map(e => e.map(cell => `"${cell}"`).join(",")).join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Reporte_Red_Enlace360_${new Date().toLocaleDateString()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 
   useEffect(() => {
     fetchData()
@@ -23,8 +50,13 @@ function App() {
       })
       .subscribe()
 
+    const intervalId = setInterval(() => {
+      fetchData()
+    }, 60000) // Refrescar cada 1 minuto para evaluar heartbeats
+
     return () => {
       supabase.removeChannel(kioskSubscription)
+      clearInterval(intervalId)
     }
   }, [])
 
@@ -41,8 +73,23 @@ function App() {
         .order('offline_time', { ascending: false })
         .limit(30)
 
-      let finalKiosks = kiosksData || []
+      let rawKiosks = kiosksData || []
       let finalEvents = eventsData || []
+
+      // Lógica de Heartbeat (Latido)
+      // Si el equipo no ha reportado latido en más de 6 minutos, asumimos que está apagado
+      let finalKiosks = rawKiosks.map(kiosk => {
+        if (kiosk.status === 'online' && kiosk.last_heartbeat) {
+          const lastHeartbeatTime = new Date(kiosk.last_heartbeat).getTime()
+          const currentTime = new Date().getTime()
+          const minutesSince = (currentTime - lastHeartbeatTime) / 60000
+
+          if (minutesSince > 6) {
+            return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
+          }
+        }
+        return kiosk
+      })
 
       if (finalKiosks.length === 0) {
         finalKiosks = []
@@ -216,7 +263,25 @@ function App() {
         </main>
 
         <aside className="glass-panel">
-          <h2 className="panel-title"><AlertTriangle size={22} color="var(--status-warning)" /> Últimas Caídas</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 className="panel-title" style={{ margin: 0 }}><AlertTriangle size={22} color="var(--status-warning)" /> Últimas Caídas</h2>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={() => setShowGlossary(true)}
+                style={{ background: 'transparent', border: '1px solid var(--text-muted)', color: 'var(--text-muted)', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
+                title="Ver diccionario de fallas"
+              >
+                <HelpCircle size={14} /> Diccionario
+              </button>
+              <button 
+                onClick={exportToCSV}
+                style={{ background: 'transparent', border: '1px solid var(--brand-cyan)', color: 'var(--brand-cyan)', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
+                title="Descargar Reporte CSV para SLA"
+              >
+                <Download size={14} /> Exportar CSV
+              </button>
+            </div>
+          </div>
           <div className="events-list">
             {filteredEvents.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', marginTop: '2rem' }}>
@@ -315,6 +380,59 @@ function App() {
 
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE GLOSARIO */}
+      {showGlossary && (
+        <div className="modal-overlay" onClick={() => setShowGlossary(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px' }}>
+            <div className="modal-header">
+              <h2><HelpCircle size={26} /> Glosario de Fallas (Causa Raíz)</h2>
+              <button className="close-btn" onClick={() => setShowGlossary(false)}><X size={24} /></button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
+                Este diccionario explica los diagnósticos forenses automáticos que realiza el Agente de Red y qué acciones debe tomar el equipo de soporte en cada caso.
+              </p>
+              
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--status-offline)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🔌 CABLE DESCONECTADO O PUERTO APAGADO (Capa 1)</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El kiosco detectó que el cable de red físico fue desconectado, dañado, o que el switch al que está conectado se quedó sin energía.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Pedir al personal en tienda que revise físicamente el cable de red detrás del kiosco y confirme que el router esté encendido.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--status-offline)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>⚠️ SIN GATEWAY / SIN DHCP. El equipo no obtuvo IP.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El cable está conectado, pero el router local no le asignó una dirección IP al kiosco (Falla del servidor DHCP).</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Reiniciar el router del local. Si persiste, TI debe revisar la configuración de red local.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--status-warning)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🚧 GATEWAY INACCESIBLE. Posible falla de switch/router.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El kiosco tiene IP asignada y el cable está bien, pero no puede comunicarse con la puerta de enlace (router). Probablemente el router está bloqueado o un switch intermedio está colgado.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Reiniciar switches y router de la sucursal.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--brand-cyan)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🌐 SIN SALIDA A INTERNET. El ISP del cliente está caído.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> La red interna de la tienda está perfecta (el cable y el router responden impecable), pero el proveedor de internet (Movistar, Claro, VTR) se cayó a nivel calle.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Levantar ticket urgente con el proveedor ISP. La falla es de ellos.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--brand-cyan)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🔍 FALLA DE DNS.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> Hay internet, pero el "traductor" de páginas (Servidor DNS) no responde.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Cambiar los DNS del equipo a 8.8.8.8 o contactar al ISP.</p>
+              </div>
+
+              <div className="alibi-section" style={{ borderColor: 'rgba(0, 230, 118, 0.3)', background: 'rgba(0, 230, 118, 0.05)' }}>
+                <h3 style={{ color: 'var(--status-online)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>✅ AUTO-REPARADO (Micro-corte)</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> Hubo una pérdida temporal de paquetes (muy común en Wi-Fi o ruido eléctrico), pero el Agente aplicó un reinicio interno de las tarjetas y revivió la conexión en milisegundos.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> ¡Nada! Es solo evidencia de que el Agente está trabajando y salvó el día.</p>
+              </div>
             </div>
           </div>
         </div>
