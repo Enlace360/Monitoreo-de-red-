@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
-import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle } from 'lucide-react'
+import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles } from 'lucide-react'
 import './index.css'
 
 function App() {
@@ -13,6 +13,68 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showGlossary, setShowGlossary] = useState(false)
+  
+  // AI Copilot States
+  const [showSettings, setShowSettings] = useState(false)
+  const [apiKey, setApiKey] = useState(localStorage.getItem('enlace360_ai_key') || '')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResponse, setAiResponse] = useState(null)
+
+  const saveApiKey = (key) => {
+    setApiKey(key)
+    localStorage.setItem('enlace360_ai_key', key)
+  }
+
+  const analyzeWithAI = async (event) => {
+    if (!apiKey) {
+      alert('Primero debes configurar tu Llave de OpenAI en los Ajustes.')
+      setShowSettings(true)
+      return
+    }
+
+    setAiLoading(true)
+    setAiResponse(null)
+
+    const kioscosMismaSucursal = allKiosks.filter(k => k.location === event.location && k.kiosk_id !== event.kiosk_id)
+    const estadoSucursal = kioscosMismaSucursal.length > 0 
+      ? kioscosMismaSucursal.map(k => `Kiosco ${k.kiosk_id}: ${k.status}`).join(', ')
+      : 'No hay otros kioscos registrados en esta sucursal.'
+
+    const prompt = `Eres el Arquitecto de Red Senior de Enlace 360.
+Analiza la siguiente caída de red de un kiosco comercial.
+Equipo Afectado: ${event.kiosk_id}
+Cliente: ${event.client_name}
+Sucursal: ${event.location || 'N/A'}
+Causa Cruda: ${event.probable_cause}
+Diagnóstico Técnico: ${JSON.stringify(event.diagnostics)}
+
+Contexto de la Sucursal: ${estadoSucursal}
+
+Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué significa esto y qué acciones inmediatas debe tomar. Sé muy breve (máximo 4 líneas) y directo. No saludes.`
+
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3
+        })
+      })
+
+      if (!res.ok) throw new Error('Error al conectar con OpenAI. Revisa tu llave API.')
+      const data = await res.json()
+      setAiResponse(data.choices[0].message.content)
+    } catch (err) {
+      setAiResponse(`Error: ${err.message}`)
+    } finally {
+      setAiLoading(false)
+    }
+  }
 
   const exportToCSV = () => {
     if (allEvents.length === 0) return;
@@ -206,9 +268,20 @@ function App() {
           </select>
         </div>
         
-        <div className="header-status">
-          <div className="live-dot"></div>
-          Monitoreo Activo
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+          <button 
+            onClick={() => setShowSettings(true)}
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-muted)', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', transition: 'all 0.2s' }}
+            title="Configuración IA"
+            onMouseOver={(e) => { e.currentTarget.style.color = 'var(--brand-cyan)'; e.currentTarget.style.borderColor = 'var(--brand-cyan)' }}
+            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
+          >
+            <Settings size={20} />
+          </button>
+          <div className="header-status">
+            <div className="live-dot"></div>
+            Monitoreo Activo
+          </div>
         </div>
       </header>
 
@@ -387,6 +460,37 @@ function App() {
                   </div>
                 </div>
               )}
+              
+              {/* IA COPILOT SECTION */}
+              <div className="alibi-section" style={{ borderColor: 'rgba(0, 163, 218, 0.4)', background: 'linear-gradient(180deg, rgba(0, 163, 218, 0.05) 0%, rgba(0, 163, 218, 0) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <h3 style={{ color: 'var(--brand-cyan)', margin: 0 }}><Sparkles size={20} /> Copiloto IA de Soporte</h3>
+                  {!aiLoading && !aiResponse && (
+                    <button 
+                      onClick={() => analyzeWithAI(selectedEvent)}
+                      style={{ background: 'var(--brand-cyan)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px var(--brand-cyan-glow)' }}
+                    >
+                      <Sparkles size={16} /> Analizar Incidente
+                    </button>
+                  )}
+                </div>
+                
+                {aiLoading && (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--brand-cyan)' }}>
+                    <div className="spinner" style={{ margin: '0 auto 10px auto', width: '24px', height: '24px', borderTopColor: 'var(--brand-cyan)' }}></div>
+                    <p style={{ margin: 0, fontWeight: '500' }}>El Copiloto está analizando los logs...</p>
+                  </div>
+                )}
+                
+                {aiResponse && (
+                  <div style={{ background: 'rgba(0,0,0,0.4)', padding: '15px', borderRadius: '8px', borderLeft: '4px solid var(--brand-cyan)' }}>
+                    <p style={{ margin: 0, fontSize: '1rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                      {aiResponse}
+                    </p>
+                  </div>
+                )}
+              </div>
+              
             </div>
           </div>
         </div>
@@ -440,6 +544,41 @@ function App() {
                 <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> Hubo una pérdida temporal de paquetes (muy común en Wi-Fi o ruido eléctrico), pero el Agente aplicó un reinicio interno de las tarjetas y revivió la conexión en milisegundos.</p>
                 <p style={{ margin: 0 }}><strong>Qué hacer:</strong> ¡Nada! Es solo evidencia de que el Agente está trabajando y salvó el día.</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AJUSTES IA */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2><Settings size={26} /> Configuración</h2>
+              <button className="close-btn" onClick={() => setShowSettings(false)}><X size={24} /></button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
+                Para habilitar el <strong>Copiloto IA</strong>, ingresa tu llave de la API de OpenAI. Esta llave se guardará exclusivamente en tu navegador de forma segura y nunca se enviará a nuestros servidores.
+              </p>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>OpenAI API Key (sk-...)</label>
+                <input 
+                  type="password" 
+                  value={apiKey}
+                  onChange={(e) => saveApiKey(e.target.value)}
+                  placeholder="sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx"
+                  style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '8px', outline: 'none', fontFamily: 'monospace' }}
+                />
+              </div>
+              
+              <button 
+                onClick={() => setShowSettings(false)}
+                style={{ width: '100%', background: 'var(--brand-cyan)', color: 'white', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Guardar y Cerrar
+              </button>
             </div>
           </div>
         </div>
