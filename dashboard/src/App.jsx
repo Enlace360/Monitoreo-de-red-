@@ -366,7 +366,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                         const parts = (kiosk.uptime || '').split(' | ')
                         const version = parts.length > 1 ? parts[1] : null
                         return version ? (
-                          <span style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
+                          <span style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,194,255,0.15)', color: 'var(--brand-cyan)', fontSize: '0.6rem', padding: '2px 7px', borderRadius: '8px', fontWeight: '600', letterSpacing: '0.5px', border: '1px solid rgba(0,194,255,0.2)' }}>
                             {version}
                           </span>
                         ) : null
@@ -617,7 +617,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter -Physical | Restart-NetAdapter')}>Reiniciar Red</button>
-                <button className="quick-cmd-btn" onClick={() => sendCommand("Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Start-Sleep -Seconds 1; Stop-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; Start-ScheduledTask -TaskName 'Enlace360_Agent'")}>Actualizar Agente</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand("Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Start-Process powershell.exe -ArgumentList '-WindowStyle Hidden -Command Start-Sleep 3; Stop-ScheduledTask Enlace360_Agent -ErrorAction SilentlyContinue; Start-Sleep 2; Start-ScheduledTask Enlace360_Agent'")}>Actualizar Agente</button>
                 <button className="quick-cmd-btn danger" onClick={() => { if(window.confirm('¿Forzar reinicio del kiosco?')) sendCommand('Restart-Computer -Force') }}>Reiniciar PC</button>
               </div>
 
