@@ -1,17 +1,139 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
-import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin } from 'lucide-react'
+import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles, Terminal, Send } from 'lucide-react'
 import './index.css'
 
 function App() {
   const [allKiosks, setAllKiosks] = useState([])
   const [allEvents, setAllEvents] = useState([])
-  
+
   const [clients, setClients] = useState([])
   const [selectedClient, setSelectedClient] = useState('Todos')
-  
+
   const [loading, setLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState(null)
+  const [showGlossary, setShowGlossary] = useState(false)
+
+  // AI Copilot States
+  const [showSettings, setShowSettings] = useState(false)
+  const [apiKey, setApiKey] = useState(localStorage.getItem('enlace360_ai_key') || '')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResponse, setAiResponse] = useState(null)
+
+  // Remote Commands (C2) States
+  const [terminalKiosk, setTerminalKiosk] = useState(null)
+  const [remoteCommands, setRemoteCommands] = useState([])
+  const [commandInput, setCommandInput] = useState('')
+
+  const saveApiKey = (key) => {
+    setApiKey(key)
+    localStorage.setItem('enlace360_ai_key', key)
+  }
+
+  const analyzeWithAI = async (event) => {
+    setAiLoading(true)
+    setAiResponse(null)
+
+    const kioscosMismaSucursal = allKiosks.filter(k => k.location === event.location && k.kiosk_id !== event.kiosk_id)
+    const estadoSucursal = kioscosMismaSucursal.length > 0
+      ? kioscosMismaSucursal.map(k => `Kiosco ${k.kiosk_id}: ${k.status}`).join(', ')
+      : 'No hay otros kioscos registrados en esta sucursal.'
+
+    const prompt = `Eres el Arquitecto de Red Senior de Enlace 360.
+Analiza la siguiente caída de red de un kiosco comercial.
+Equipo Afectado: ${event.kiosk_id}
+Cliente: ${event.client_name}
+Sucursal: ${event.location || 'N/A'}
+Causa Cruda: ${event.probable_cause}
+Diagnóstico Técnico: ${JSON.stringify(event.diagnostics)}
+
+Contexto de la Sucursal: ${estadoSucursal}
+
+Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué significa esto y qué acciones inmediatas debe tomar. Sé muy breve (máximo 4 líneas) y directo. No saludes.`
+
+    try {
+      // Usando Pollinations.ai (Open, sin API Key) para ambiente de pruebas
+      const res = await fetch('https://text.pollinations.ai/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: prompt }]
+        })
+      })
+
+      if (!res.ok) {
+        throw new Error(`Error de conexión HTTP: ${res.status}`)
+      }
+      
+      const textResponse = await res.text()
+      setAiResponse(textResponse)
+    } catch (err) {
+      setAiResponse(`Error: ${err.message}`)
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  // C2 Functions
+  const fetchRemoteCommands = async (kioskId) => {
+    const { data, error } = await supabase
+      .from('remote_commands')
+      .select('*')
+      .eq('kiosk_id', kioskId)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    if (!error && data) setRemoteCommands(data)
+  }
+
+  const sendCommand = async (cmdString) => {
+    if (!cmdString.trim() || !terminalKiosk) return
+    const { error } = await supabase
+      .from('remote_commands')
+      .insert([{ kiosk_id: terminalKiosk, command_string: cmdString, status: 'pending' }])
+    if (!error) {
+      setCommandInput('')
+      fetchRemoteCommands(terminalKiosk)
+    } else {
+      alert("Error enviando comando: " + error.message)
+    }
+  }
+
+  useEffect(() => {
+    let interval;
+    if (terminalKiosk) {
+      fetchRemoteCommands(terminalKiosk)
+      interval = setInterval(() => fetchRemoteCommands(terminalKiosk), 5000)
+    }
+    return () => clearInterval(interval)
+  }, [terminalKiosk])
+
+  const exportToCSV = () => {
+    if (allEvents.length === 0) return;
+    const headers = ['Kiosco', 'Cliente', 'Sucursal', 'Causa Probable', 'Fecha Caída', 'Fecha Recuperación', 'Estado'];
+    const rows = allEvents.map(e => [
+      e.kiosk_id,
+      e.client_name,
+      e.location || 'Sede Principal',
+      e.probable_cause,
+      new Date(e.offline_time).toLocaleString(),
+      e.online_time ? new Date(e.online_time).toLocaleString() : 'Aún Caído',
+      e.online_time ? 'Recuperado' : 'Crítico'
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8,"
+      + headers.join(",") + "\n"
+      + rows.map(e => e.map(cell => `"${cell}"`).join(",")).join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Reporte_Red_Enlace360_${new Date().toLocaleDateString()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 
   useEffect(() => {
     fetchData()
@@ -19,7 +141,7 @@ function App() {
     const kioskSubscription = supabase
       .channel('kiosks-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'kiosks' }, payload => {
-        fetchData() 
+        fetchData()
       })
       .subscribe()
 
@@ -39,7 +161,7 @@ function App() {
         .from('kiosks')
         .select('*')
         .order('kiosk_id', { ascending: true })
-      
+
       const { data: eventsData, error: eventsError } = await supabase
         .from('network_events')
         .select('*')
@@ -60,6 +182,10 @@ function App() {
           if (minutesSince > 6) {
             return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
           }
+
+          if (kiosk.latency_ms && kiosk.latency_ms > 500) {
+            return { ...kiosk, status: 'degraded', uptime: `${kiosk.latency_ms}ms (Lento)` }
+          }
         }
         return kiosk
       })
@@ -67,9 +193,9 @@ function App() {
       if (finalKiosks.length === 0) {
         finalKiosks = []
         finalEvents = []
-        
+
         const malls = ['Mall La Reina', 'Mall La Florida', 'Mall La Dehesa']
-        
+
         malls.forEach((mall, mallIndex) => {
           // Generamos 10 equipos por sucursal
           for (let i = 1; i <= 10; i++) {
@@ -77,7 +203,7 @@ function App() {
             const isOffline = (i === 3 || (i === 7 && mallIndex !== 2))
             const kioskPrefix = mall.replace('Mall La ', '').toUpperCase()
             const kioskId = `TOTEM-${kioskPrefix}-${i.toString().padStart(2, '0')}`
-            
+
             finalKiosks.push({
               kiosk_id: kioskId,
               client_name: 'Cenco Malls',
@@ -85,7 +211,7 @@ function App() {
               status: isOffline ? 'offline' : 'online',
               uptime: isOffline ? 'Desconocido' : `${Math.floor(Math.random() * 14) + 1} días, ${Math.floor(Math.random() * 12)} horas`
             })
-            
+
             if (isOffline) {
               const cause = i === 3 ? 'CABLE DESCONECTADO O PUERTO APAGADO (Falla de Capa 1)' : 'GATEWAY INACCESIBLE. Posible falla de switch/router.';
               finalEvents.push({
@@ -116,7 +242,7 @@ function App() {
 
       const uniqueClients = [...new Set(finalKiosks.map(k => k.client_name))]
       setClients(uniqueClients)
-      
+
       // Si solo hay un cliente, autoseleccionarlo en lugar de 'Todos' para mejor UX
       if (uniqueClients.length === 1 && selectedClient === 'Todos') {
         setSelectedClient(uniqueClients[0])
@@ -158,14 +284,14 @@ function App() {
       <header className="header">
         <div className="brand-container">
           <img src="/logo.png" alt="Enlace 360" className="brand-logo" onError={(e) => {
-            e.target.style.display='none';
-            e.target.nextSibling.style.display='block';
+            e.target.style.display = 'none';
+            e.target.nextSibling.style.display = 'block';
           }} />
           <h1 style={{ display: 'none', margin: 0, color: 'var(--brand-cyan)' }}>ENLACE 360</h1>
-          
-          <select 
-            className="client-selector" 
-            value={selectedClient} 
+
+          <select
+            className="client-selector"
+            value={selectedClient}
             onChange={(e) => setSelectedClient(e.target.value)}
           >
             <option value="Todos">Todos los Clientes ({allKiosks.length})</option>
@@ -174,10 +300,21 @@ function App() {
             ))}
           </select>
         </div>
-        
-        <div className="header-status">
-          <div className="live-dot"></div>
-          Monitoreo Activo
+
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+          <button
+            onClick={() => setShowSettings(true)}
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-muted)', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', transition: 'all 0.2s' }}
+            title="Configuración IA"
+            onMouseOver={(e) => { e.currentTarget.style.color = 'var(--brand-cyan)'; e.currentTarget.style.borderColor = 'var(--brand-cyan)' }}
+            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
+          >
+            <Settings size={20} />
+          </button>
+          <div className="header-status">
+            <div className="live-dot"></div>
+            Monitoreo Activo
+          </div>
         </div>
       </header>
 
@@ -212,21 +349,44 @@ function App() {
       <div className="dashboard-layout">
         <main className="glass-panel main-panel">
           <h2 className="panel-title"><Monitor size={22} color="var(--brand-cyan)" /> Flota de Kioscos</h2>
-          
+
           <div className="locations-container">
             {Object.entries(kiosksByLocation).map(([location, groupKiosks]) => (
               <div key={location} className="location-group">
                 <h3 className="location-title">
-                  <MapPin size={18} color="var(--brand-cyan)" /> 
-                  {location} 
+                  <MapPin size={18} color="var(--brand-cyan)" />
+                  {location}
                   <span className="location-count">({groupKiosks.length})</span>
                 </h3>
                 <div className="kiosk-grid">
                   {groupKiosks.map((kiosk, idx) => (
-                    <div key={idx} className={`kiosk-card ${kiosk.status}`}>
+                    <div key={idx} className={`kiosk-card ${kiosk.status}`} style={{ position: 'relative' }}>
                       <div className="status-indicator"></div>
+                      {(() => {
+                        const parts = (kiosk.uptime || '').split(' | ')
+                        const version = parts.length > 1 ? parts[1] : null
+                        return version ? (
+                          <span style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
+                            {version}
+                          </span>
+                        ) : null
+                      })()}
                       <div className="kiosk-name">{kiosk.kiosk_id}</div>
-                      <div className="kiosk-uptime">{kiosk.uptime || 'Iniciando...'}</div>
+                      <div className="kiosk-uptime">{(kiosk.uptime || 'Iniciando...').split(' | ')[0]}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(0,0,0,0.15)', padding: '5px', borderRadius: '4px' }}>
+                        <span>IP: {kiosk.ip_address || 'Desconocida'}</span>
+                        {kiosk.mac_address && <span>MAC: {kiosk.mac_address}</span>}
+                      </div>
+                      <button 
+                        className="terminal-btn"
+                        onClick={(e) => { e.stopPropagation(); setTerminalKiosk(kiosk.kiosk_id) }}
+                        style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', opacity: 0.7, padding: '5px' }}
+                        title="Abrir Terminal Remota"
+                        onMouseOver={(e) => { e.currentTarget.style.color = 'var(--brand-cyan)'; e.currentTarget.style.opacity = 1 }}
+                        onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.opacity = 0.7 }}
+                      >
+                        <Terminal size={18} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -236,7 +396,25 @@ function App() {
         </main>
 
         <aside className="glass-panel">
-          <h2 className="panel-title"><AlertTriangle size={22} color="var(--status-warning)" /> Últimas Caídas</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 className="panel-title" style={{ margin: 0 }}><AlertTriangle size={22} color="var(--status-warning)" /> Últimas Caídas</h2>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setShowGlossary(true)}
+                style={{ background: 'transparent', border: '1px solid var(--text-muted)', color: 'var(--text-muted)', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
+                title="Ver diccionario de fallas"
+              >
+                <HelpCircle size={14} /> Diccionario
+              </button>
+              <button
+                onClick={exportToCSV}
+                style={{ background: 'transparent', border: '1px solid var(--brand-cyan)', color: 'var(--brand-cyan)', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
+                title="Descargar Reporte CSV para SLA"
+              >
+                <Download size={14} /> Exportar CSV
+              </button>
+            </div>
+          </div>
           <div className="events-list">
             {filteredEvents.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', marginTop: '2rem' }}>
@@ -246,12 +424,12 @@ function App() {
               filteredEvents.map((ev, idx) => (
                 <div key={idx} className="event-item" onClick={() => setSelectedEvent(ev)}>
                   <div className="event-header">
-                    <span className="event-kiosk"><ShieldAlert size={16} color="var(--status-offline)"/> {ev.kiosk_id}</span>
+                    <span className="event-kiosk"><ShieldAlert size={16} color="var(--status-offline)" /> {ev.kiosk_id}</span>
                     <span className="event-time">
-                      {new Date(ev.offline_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {new Date(ev.offline_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  <div className="event-location"><MapPin size={12}/> {ev.location || 'Sede Principal'}</div>
+                  <div className="event-location"><MapPin size={12} /> {ev.location || 'Sede Principal'}</div>
                   <p className="event-cause">{ev.probable_cause}</p>
                 </div>
               ))
@@ -277,7 +455,7 @@ function App() {
                     <strong>Cliente:</strong> {selectedEvent.client_name}
                   </span>
                   <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <MapPin size={14}/> {selectedEvent.location || 'Sede Principal'}
+                    <MapPin size={14} /> {selectedEvent.location || 'Sede Principal'}
                   </span>
                 </div>
               </div>
@@ -298,16 +476,16 @@ function App() {
                 )}
               </div>
 
-              {selectedEvent.diagnostics && (
+              {selectedEvent.diagnostics && Object.keys(selectedEvent.diagnostics).length > 0 && (
                 <div className="alibi-section">
-                  <h3><Network size={20} /> Evidencia Técnica (El "Alibi")</h3>
-                  
+                  <h3><Network size={20} /> Diagnóstico Forense de Red</h3>
+
                   {selectedEvent.diagnostics.Adapters && (
                     <div style={{ marginBottom: '1.5rem' }}>
                       <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Estado de Tarjetas de Red (Físico):</p>
                       {selectedEvent.diagnostics.Adapters.map((a, i) => (
                         <div key={i} style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px', marginBottom: '5px' }}>
-                          <strong>{a.Name}:</strong> {a.InterfaceDescription} 
+                          <strong>{a.Name}:</strong> {a.InterfaceDescription}
                           <span className={`status-badge ${a.Status?.toLowerCase()}`} style={{ float: 'right' }}>
                             {a.Status}
                           </span>
@@ -319,22 +497,196 @@ function App() {
                   <div style={{ marginBottom: '1.5rem' }}>
                     <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Conectividad Local (Gateway):</p>
                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px' }}>
-                      <strong>IP del Router Local:</strong> {selectedEvent.diagnostics.GatewayIP || 'Desconocida'} <br/>
-                      <strong>Llega al Router:</strong> {selectedEvent.diagnostics.GatewayReachable ? '✅ Sí' : '❌ No'}
+                      <strong>IP del Router Local:</strong> {selectedEvent.diagnostics.GatewayIP || 'No detectada'} <br />
+                      <strong>Conexión con el Router:</strong> {selectedEvent.diagnostics.GatewayReachable ? '✅ Responde (El cable local está bien)' : '❌ No responde'}
                     </div>
                   </div>
 
                   <div>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>JSON Raw (Para Soporte Nivel 3):</p>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Registro Completo del Sistema (Raw JSON):</p>
                     <div className="code-block">
                       <pre style={{ margin: 0 }}>
                         {JSON.stringify(selectedEvent.diagnostics, null, 2)}
                       </pre>
                     </div>
                   </div>
-
                 </div>
               )}
+
+              {/* IA COPILOT SECTION */}
+              <div className="alibi-section" style={{ borderColor: 'rgba(0, 163, 218, 0.4)', background: 'linear-gradient(180deg, rgba(0, 163, 218, 0.05) 0%, rgba(0, 163, 218, 0) 100%)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <h3 style={{ color: 'var(--brand-cyan)', margin: 0 }}><Sparkles size={20} /> Copiloto IA de Soporte</h3>
+                  {!aiLoading && !aiResponse && (
+                    <button
+                      onClick={() => analyzeWithAI(selectedEvent)}
+                      style={{ background: 'var(--brand-cyan)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px var(--brand-cyan-glow)' }}
+                    >
+                      <Sparkles size={16} /> Analizar Incidente
+                    </button>
+                  )}
+                </div>
+
+                {aiLoading && (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--brand-cyan)' }}>
+                    <div className="spinner" style={{ margin: '0 auto 10px auto', width: '24px', height: '24px', borderTopColor: 'var(--brand-cyan)' }}></div>
+                    <p style={{ margin: 0, fontWeight: '500' }}>El Copiloto está analizando los logs...</p>
+                  </div>
+                )}
+
+                {aiResponse && (
+                  <div style={{ background: 'rgba(0,0,0,0.4)', padding: '15px', borderRadius: '8px', borderLeft: '4px solid var(--brand-cyan)' }}>
+                    <p style={{ margin: 0, fontSize: '1rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                      {aiResponse}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE GLOSARIO */}
+      {showGlossary && (
+        <div className="modal-overlay" onClick={() => setShowGlossary(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px' }}>
+            <div className="modal-header">
+              <h2><HelpCircle size={26} /> Glosario de Fallas (Causa Raíz)</h2>
+              <button className="close-btn" onClick={() => setShowGlossary(false)}><X size={24} /></button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
+                Este diccionario explica los diagnósticos forenses automáticos que realiza el Agente de Red y qué acciones debe tomar el equipo de soporte en cada caso.
+              </p>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--status-offline)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🔌 CABLE DESCONECTADO O PUERTO APAGADO (Capa 1)</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El kiosco detectó que el cable de red físico fue desconectado, dañado, o que el switch al que está conectado se quedó sin energía.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Pedir al personal en tienda que revise físicamente el cable de red detrás del kiosco y confirme que el router esté encendido.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--status-offline)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>⚠️ SIN GATEWAY / SIN DHCP. El equipo no obtuvo IP.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El cable está conectado, pero el router local no le asignó una dirección IP al kiosco (Falla del servidor DHCP).</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Reiniciar el router del local. Si persiste, TI debe revisar la configuración de red local.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--status-warning)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🚧 GATEWAY INACCESIBLE. Posible falla de switch/router.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El kiosco tiene IP asignada y el cable está bien, pero no puede comunicarse con la puerta de enlace (router). Probablemente el router está bloqueado o un switch intermedio está colgado.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Reiniciar switches y router de la sucursal.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--brand-cyan)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🌐 SIN SALIDA A INTERNET. El ISP del cliente está caído.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> La red interna de la tienda está perfecta (el cable y el router responden impecable), pero el proveedor de internet (Movistar, Claro, VTR) se cayó a nivel calle.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Levantar ticket urgente con el proveedor ISP. La falla es de ellos.</p>
+              </div>
+
+              <div className="alibi-section">
+                <h3 style={{ color: 'var(--brand-cyan)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🔍 FALLA DE DNS.</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> Hay internet, pero el "traductor" de páginas (Servidor DNS) no responde.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> Cambiar los DNS del equipo a 8.8.8.8 o contactar al ISP.</p>
+              </div>
+
+              <div className="alibi-section" style={{ borderColor: 'rgba(0, 230, 118, 0.3)', background: 'rgba(0, 230, 118, 0.05)' }}>
+                <h3 style={{ color: 'var(--status-online)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>✅ AUTO-REPARADO (Micro-corte)</h3>
+                <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> Hubo una pérdida temporal de paquetes (muy común en Wi-Fi o ruido eléctrico), pero el Agente aplicó un reinicio interno de las tarjetas y revivió la conexión en milisegundos.</p>
+                <p style={{ margin: 0 }}><strong>Qué hacer:</strong> ¡Nada! Es solo evidencia de que el Agente está trabajando y salvó el día.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE TERMINAL C2 */}
+      {terminalKiosk && (
+        <div className="modal-overlay" onClick={() => setTerminalKiosk(null)}>
+          <div className="modal-content terminal-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%', background: '#0a0a0a' }}>
+            <div className="modal-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '15px' }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--brand-cyan)', margin: 0 }}>
+                <Terminal size={24} /> 
+                Terminal Remota: {terminalKiosk}
+              </h2>
+              <button className="close-btn" onClick={() => setTerminalKiosk(null)}><X size={24} /></button>
+            </div>
+            
+            <div className="modal-body" style={{ padding: '20px 0 0 0' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
+                <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter -Physical | Restart-NetAdapter')}>Reiniciar Red</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand("Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Start-Sleep -Seconds 1; Stop-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; Start-ScheduledTask -TaskName 'Enlace360_Agent'")}>Actualizar Agente</button>
+                <button className="quick-cmd-btn danger" onClick={() => { if(window.confirm('¿Forzar reinicio del kiosco?')) sendCommand('Restart-Computer -Force') }}>Reiniciar PC</button>
+              </div>
+
+              <div className="terminal-logs">
+                {remoteCommands.length === 0 ? (
+                  <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: '40px' }}>No hay comandos recientes. Escribe un comando para empezar.</div>
+                ) : (
+                  remoteCommands.map(cmd => (
+                    <div key={cmd.id} className="terminal-entry">
+                      <div className="cmd-prompt"><span style={{color:'var(--brand-cyan)'}}>root@{terminalKiosk}:~#</span> {cmd.command_string}</div>
+                      <div className="cmd-meta">Estado: <span className={`status-badge ${cmd.status}`}>{cmd.status.toUpperCase()}</span> | Enviado: {new Date(cmd.created_at).toLocaleTimeString()}</div>
+                      {cmd.output_log && (
+                        <pre className="cmd-output">{cmd.output_log}</pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="terminal-input-container">
+                <span style={{ color: 'var(--brand-cyan)', fontWeight: 'bold' }}>$</span>
+                <input 
+                  type="text" 
+                  className="terminal-input"
+                  value={commandInput}
+                  onChange={(e) => setCommandInput(e.target.value)}
+                  onKeyDown={(e) => { if(e.key === 'Enter') sendCommand(commandInput) }}
+                  placeholder="Escribe un comando PowerShell..."
+                  autoFocus
+                />
+                <button onClick={() => sendCommand(commandInput)} className="terminal-send-btn">
+                  <Send size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AJUSTES IA */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2><Settings size={26} /> Configuración</h2>
+              <button className="close-btn" onClick={() => setShowSettings(false)}><X size={24} /></button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
+                El <strong>Copiloto IA</strong> actualmente está funcionando en modo de pruebas mediante una API gratuita y abierta (Pollinations). No necesitas ninguna llave por ahora.
+              </p>
+
+              <div style={{ marginBottom: '20px', opacity: 0.5, pointerEvents: 'none' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>Google Gemini API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => saveApiKey(e.target.value)}
+                  placeholder="No requerida en fase de pruebas"
+                  style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '8px', outline: 'none', fontFamily: 'monospace' }}
+                />
+              </div>
+
+              <button
+                onClick={() => setShowSettings(false)}
+                style={{ width: '100%', background: 'var(--brand-cyan)', color: 'white', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Guardar y Cerrar
+              </button>
             </div>
           </div>
         </div>
