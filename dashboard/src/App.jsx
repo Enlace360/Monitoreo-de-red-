@@ -26,12 +26,6 @@ function App() {
   }
 
   const analyzeWithAI = async (event) => {
-    if (!apiKey) {
-      alert('Primero debes configurar tu Llave de Google Gemini en los Ajustes.')
-      setShowSettings(true)
-      return
-    }
-
     setAiLoading(true)
     setAiResponse(null)
 
@@ -53,28 +47,23 @@ Contexto de la Sucursal: ${estadoSucursal}
 Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué significa esto y qué acciones inmediatas debe tomar. Sé muy breve (máximo 4 líneas) y directo. No saludes.`
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      // Usando Pollinations.ai (Open, sin API Key) para ambiente de pruebas
+      const res = await fetch('https://text.pollinations.ai/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.3
-          }
+          messages: [{ role: 'user', content: prompt }]
         })
       })
 
       if (!res.ok) {
-        const errText = await res.text()
-        throw new Error(`HTTP ${res.status} - ${errText}`)
+        throw new Error(`Error de conexión HTTP: ${res.status}`)
       }
       
-      const data = await res.json()
-      setAiResponse(data.candidates[0].content.parts[0].text)
+      const textResponse = await res.text()
+      setAiResponse(textResponse)
     } catch (err) {
       setAiResponse(`Error: ${err.message}`)
     } finally {
@@ -565,16 +554,16 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             </div>
             <div className="modal-body">
               <p style={{ color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
-                Para habilitar el <strong>Copiloto IA</strong>, ingresa tu llave de la API de Google Gemini (es 100% gratuita). Esta llave se guardará exclusivamente en tu navegador de forma segura.
+                El <strong>Copiloto IA</strong> actualmente está funcionando en modo de pruebas mediante una API gratuita y abierta (Pollinations). No necesitas ninguna llave por ahora.
               </p>
 
-              <div style={{ marginBottom: '20px' }}>
+              <div style={{ marginBottom: '20px', opacity: 0.5, pointerEvents: 'none' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>Google Gemini API Key</label>
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => saveApiKey(e.target.value)}
-                  placeholder="AIzaSyBxxxxxxxxxxxxxxxxxxxxxxxx"
+                  placeholder="No requerida en fase de pruebas"
                   style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '8px', outline: 'none', fontFamily: 'monospace' }}
                 />
               </div>
