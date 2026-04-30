@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.4"
+$AgentVersion = "v3.5"
 
 $CheckIntervalSecs = 30      
 $LogDir = "C:\KioskNetMonitor"
@@ -306,7 +306,7 @@ Function Check-Heartbeat {
         } catch { }
     }
     
-    if (-not $lastHeartbeatTime -or ($now - $lastHeartbeatTime).TotalMinutes -ge 5) {
+    if (-not $lastHeartbeatTime -or ($now - $lastHeartbeatTime).TotalMinutes -ge 2) {
         Update-KioskStatus -Status "online" -Latency (Test-InternetConnection).Latency
         $now.ToString("yyyy-MM-dd HH:mm:ss") | Set-Content $HeartbeatFile
     }

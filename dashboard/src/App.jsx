@@ -192,7 +192,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
           const currentTime = new Date().getTime()
           const minutesSince = (currentTime - lastHeartbeatTime) / 60000
 
-          if (minutesSince > 6) {
+          if (minutesSince > 10) {
             return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
           }
 
