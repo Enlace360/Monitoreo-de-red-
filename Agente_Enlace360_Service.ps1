@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.0"
+$AgentVersion = "v3.1"
 
 $CheckIntervalSecs = 30      
 $LogDir = "C:\KioskNetMonitor"
