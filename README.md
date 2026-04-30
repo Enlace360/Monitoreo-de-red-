@@ -1,105 +1,51 @@
-# Kiosk Command Center - Enlace 360
+# 🗼 Torre de Control Enlace 360
 
-Este documento contiene la guía técnica definitiva para implementar, instalar y utilizar la plataforma de monitoreo de red desarrollada para los kioscos de Enlace 360.
+La **Torre de Control** no es solo un monitor de red; es una plataforma de **Inteligencia de Infraestructura y Auto-Mantenimiento** diseñada específicamente para flotas distribuidas de kioscos Windows en entornos hostiles (como Malls o sucursales comerciales).
 
----
-
-## 🏗 Arquitectura de la Solución
-
-El sistema funciona bajo una arquitectura **Serverless (Sin Servidor)** en tres capas:
-
-1. **El Agente Local (PowerShell):** Se ejecuta de forma invisible en cada kiosco Windows. Actúa como el "médico" del equipo: monitorea los latidos de la red, intenta auto-reparar cortes, y si la red muere definitivamente, ejecuta un análisis forense exhaustivo.
-2. **El Cerebro Central (Supabase / PostgreSQL):** Base de datos en la nube que recibe los "Pings" y los "Reportes de Incidentes" de los agentes mediante una API REST segura.
-3. **La Torre de Control (React / Vite):** Dashboard web Premium de Enlace 360, diseñado para monitorear en tiempo real el estado de salud de todos los equipos agrupados por cliente y sucursal.
+Su objetivo principal es eliminar los "falsos positivos", automatizar el trabajo de soporte técnico en terreno y proporcionar evidencia forense irrefutable frente a caídas causadas por los Proveedores de Internet (ISPs) de los clientes.
 
 ---
 
-## 🛠 Paso 1: Configurar el Cerebro Central (Supabase)
+## 🚀 Virtudes Principales de la Arquitectura
 
-Supabase es el servicio gratuito que guardará el historial de caídas de forma segura.
+### 1. Resiliencia Extrema (El Agente Inmortal)
+A diferencia de los monitores tradicionales, el Agente Local está diseñado para sobrevivir a casi cualquier eventualidad:
+- **Watchdog Integrado:** Si el proceso es cerrado accidentalmente, Windows lo reiniciará automáticamente hasta 999 veces en lapsos de un minuto.
+- **Zero-Touch Auto-Updates:** El agente es capaz de descargar actualizaciones silenciosas de su propio código fuente desde GitHub en cada inicio. Esto permite cambiar su comportamiento de forma masiva en 100+ equipos sin necesidad de usar TeamViewer nunca más.
+- **Mutex Anti-Clonación:** Protegido contra la duplicación de procesos en memoria RAM para evitar que el envío de datos sature la red.
 
-1. Crea una cuenta gratuita en [Supabase.com](https://supabase.com).
-2. Crea un **Nuevo Proyecto**.
-3. Ve a la sección **SQL Editor** en el menú izquierdo.
-4. Abre el archivo `supabase_schema.sql` que está en esta carpeta, copia todo su contenido y pégalo en el editor de Supabase.
-5. Presiona **Run**. Esto creará automáticamente las tablas `kiosks` y `network_events` con sus reglas de seguridad.
-6. Ve a **Project Settings -> API**. Allí encontrarás la `Project URL` y la `anon public key`. Copia ambos valores, los necesitarás en los pasos siguientes.
+### 2. Auto-Sanación (Self-Healing de 3 Fases)
+Cuando un equipo pierde conexión, el agente no se rinde, sino que intenta revivir el kiosco de forma escalonada:
+1. **Fase Lógica:** Limpieza profunda de la caché DNS (*FlushDNS*) adaptada para redes con IPs Fijas.
+2. **Fase Física:** Si la red sigue caída, el agente "desenchufa y vuelve a enchufar" digitalmente la tarjeta de red de Windows.
+3. **Protocolo "Lázaro":** Si el equipo lleva más de 1 hora continua completamente desconectado, el agente asume que el Kernel de Windows se congeló y dispara un comando de reinicio forzado del sistema operativo (Hard Reboot), evitando el despacho de un técnico a la sucursal.
 
----
+### 3. Diagnóstico Forense de Red
+Cuando ocurre una caída real y prolongada, el agente recopila un registro completo de la salud del equipo en todas las capas del modelo OSI antes de desconectarse. Esto permite saber exactamente **de quién es la culpa**:
+- **Capa 1 (Física):** Detecta si el cable de red fue desconectado manualmente del equipo.
+- **Gateway:** Detecta si el Router local del cliente dejó de responder o si no asignó IPs.
+- **DNS / Firewall:** Evalúa si la IP responde pero existe un bloqueo interno de nombres de dominio o un proxy corporativo impidiendo el paso.
 
-## 💻 Paso 2: Configurar e Instalar los Agentes en los Kioscos
+### 4. Inteligencia Anti-Amnesia (Gestión de Estados)
+Las caídas de red a menudo interrumpen el envío de los propios reportes de caída. El agente incluye una "Memoria Persistente":
+- Si el internet se corta, el agente anota el incidente en su disco duro local.
+- Cuando el internet regresa, el agente **espera inteligentemente 10 segundos** para permitir que las rutas TCP y los DNS se estabilicen completamente.
+- Luego intenta enviar el reporte. Si la base de datos no responde por intermitencia de red, el agente se niega a olvidar el problema y reintenta infinitamente cada 30 segundos hasta asegurar que el evento llegó a la Torre de Control.
 
-El agente debe instalarse en cada uno de los 100 equipos Windows.
-
-### 2.1. Configuración del Script
-Abre el archivo `KioskNetMonitor_Supabase.ps1` y edita las primeras líneas (Líneas 12 a 18):
-```powershell
-$ClientName = "Nombre Del Cliente"      # Ej: Cenco Malls
-$Location = "Nombre De La Sucursal"     # Ej: Mall Costanera Center
-$SupabaseUrl = "TU_URL_DE_SUPABASE"     # Ej: https://xxxx.supabase.co
-$SupabaseAnonKey = "TU_LLAVE_ANONIMA"   # La llave kilométrica de Supabase
-```
-
-### 2.2. Instalación Silenciosa (Para que corra 24/7)
-Para que el script corra en segundo plano siempre que el PC esté encendido, aunque se reinicie, debes crear una **Tarea Programada** en Windows. 
-Abre PowerShell como **Administrador** en el kiosco y ejecuta esto para instalarlo (asumiendo que copiaste el script a `C:\KioskNetMonitor\`):
-
-```powershell
-$action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument '-ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\KioskNetMonitor\KioskNetMonitor_Supabase.ps1"'
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal
-Register-ScheduledTask -TaskName "Enlace360-NetMonitor" -InputObject $task
-Start-ScheduledTask -TaskName "Enlace360-NetMonitor"
-```
-*(A partir de ese momento, el equipo empezará a reportarse como "Online" en tu plataforma).*
+### 5. Monitor de Calidad (QoS) y Verificación Multi-Punto
+Para evitar ser engañado por firewalls de clientes que bloquean *pings* aleatorios, el agente usa verificación en cascada:
+- Intenta ping a Google (8.8.8.8), luego a Cloudflare (1.1.1.1), y finalmente una conexión HTTP encriptada. Solo si las tres fallan decreta una caída oficial.
+- Paralelamente, mide la latencia de la respuesta en milisegundos. Si el internet funciona pero la velocidad supera los 500ms, el equipo se declara en estado **"Degradado"** para advertir de transacciones de pago lentas o fallidas.
 
 ---
 
-## 🌐 Paso 3: Lanzar la Torre de Control (Dashboard)
+## 🖥️ El Dashboard (Torre de Control Web)
 
-El Dashboard está construido con React y Vite. 
+La interfaz en tiempo real construida en React actúa como el punto central para el equipo directivo y de soporte:
 
-### 3.1. Conexión a Base de Datos
-Dentro de la carpeta `dashboard/`, crea un archivo llamado `.env` y pega tus credenciales de Supabase:
-```env
-VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
-VITE_SUPABASE_ANON_KEY=tu-llave-anonima
-```
+- **Reactividad Instantánea (WebSocket):** Refleja si un equipo se apaga o sufre variaciones de latencia sin necesidad de recargar la página.
+- **Exportación de Evidencia SLA:** Generador de reportes en formato `.csv` con 1 clic para auditar el "Uptime" o exigir compensaciones a los proveedores de internet del mall.
+- **Glosario de Fallas Integrado:** Una "Wiki" de soporte directamente en la interfaz que traduce la compleja jerga de redes (ej: *Fallback, Gateway, IP*) a lenguaje humano, diciéndole al personal de soporte exactamente qué botón apretar, qué cable mirar o a quién llamar.
+- **Filtrado Dinámico:** Permite visualizar rápidamente flotas específicas separadas por "Cliente" y "Sucursal".
 
-### 3.2. Ejecutar Localmente
-Para correrlo en tu Mac y probarlo:
-```bash
-cd dashboard
-npm install
-npm run dev
-```
-
-### 3.3. Despliegue Público (Cloudflare Pages)
-Para que tú y tu equipo puedan verlo en cualquier lado sin depender de tu Mac:
-1. Sube todo el código de la carpeta `dashboard` a un repositorio privado en **GitHub**.
-2. Entra a **Cloudflare Pages** y conéctalo a ese repositorio.
-3. En la configuración de Cloudflare, establece:
-   - Framework: `Vite` o `React`
-   - Build command: `npm run build`
-   - Build output directory: `dist`
-   - **Environment Variables:** No olvides agregar aquí las dos variables de Supabase.
-
----
-
-## 🛡 Guía de Defensa: Interpretando la Matriz Forense (El "Alibi")
-
-Cuando un equipo pierde conexión y la recupera, el agente envía un reporte forense exhaustivo evaluando la red en 4 capas. Cuando el cliente culpe a tus kioscos, haz clic en el incidente en la web y busca el **Causa Raíz Probable**.
-
-Aquí tienes cómo usar esa información a tu favor:
-
-| Mensaje de Causa Raíz en el Dashboard | Lo que significa técnicamente | Qué decirle al cliente |
-| :--- | :--- | :--- |
-| **CABLE DESCONECTADO O PUERTO APAGADO (Falla de Capa 1)** | El PC de tu kiosco no detecta señal eléctrica en su puerto de red. | *"Estimado cliente, la tarjeta de red del equipo no recibe señal física. Por favor verifiquen si alguien desconectó el cable, si se dañó, o si el Switch al que está conectado se apagó."* |
-| **GATEWAY INACCESIBLE** | El cable está conectado (hay link), pero el PC no puede hacer ping al router/switch principal de la red local. | *"El equipo tiene el cable bien conectado, pero su router (ej: 192.168.1.1) dejó de respondernos. Favor revisar la red local del Mall."* |
-| **SIN SALIDA A INTERNET** | El PC llega al router, pero el ping público (8.8.8.8) falla. | *"El equipo llega a su router local sin problemas, pero el ISP de la sucursal perdió conectividad hacia el exterior."* |
-| **FALLA DE DNS** | El internet por IP funciona, pero los servidores DNS entregados por el cliente fallaron al resolver 'google.com'. | *"Existe un bloqueo en los servidores DNS de la red, ya que el equipo tiene internet pero no logra resolver páginas web. Revisen su configuración de DNS/Firewall."* |
-| **BLOQUEO HACIA PLATAFORMA** | Todo el internet y DNS funciona, pero Supabase no respondió. | *(En este caso, la responsabilidad puede ser tuya o de un Firewall estricto del cliente bloqueando URLs desconocidas).* |
-
----
-**Nota final de diseño:** El Dashboard posee datos falsos (dummy data) configurados por defecto para poder visualizar la grilla de equipos sin conexión a la base de datos. Una vez que agregues el archivo `.env` con las credenciales reales, el sistema vaciará los datos de prueba y comenzará a mostrar la flota real de kioscos.
+> **Misión Cumplida:** Una herramienta de grado corporativo (*Enterprise*) que transforma un simple problema de "no hay internet" en métricas accionables y mantenimientos autónomos.

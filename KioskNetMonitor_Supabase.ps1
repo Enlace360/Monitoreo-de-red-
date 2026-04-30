@@ -13,19 +13,26 @@
 $ClientName = "Cencosud"
 $Location = "Mall Costanera Center" # NUEVO: Sucursal o Ubicación del equipo
 $KioskName = "NOMBRE_KIOSCO_AQUI"
+$AgentVersion = "v1.1"
 
 # Datos de tu proyecto Supabase (Obtén esto en Project Settings -> API)
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
 
 # Configuración de Monitoreo
-$TargetPing = "8.8.8.8"      
 $CheckIntervalSecs = 30      
 $LogDir = "C:\KioskNetMonitor"
 
 # ============================================================================
 # INICIALIZACIÓN Y ARCHIVOS
 # ============================================================================
+$createdNew = $false
+$mutex = New-Object System.Threading.Mutex($true, "Global\KioskNetMonitor", [ref]$createdNew)
+if (-not $createdNew) {
+    Write-Output "Ya hay otra instancia del monitor corriendo. Saliendo..."
+    exit
+}
+
 if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
 $StateFile = Join-Path $LogDir "network_state.json"
 $HeartbeatFile = Join-Path $LogDir "last_heartbeat.txt"
@@ -49,10 +56,48 @@ Function Get-DefaultGateway {
 
 Function Get-LocalIP {
     try {
-        $ip = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -ne "Loopback Pseudo-Interface 1" } | Select-Object -First 1
+        $route = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1
+        if ($route) {
+            $ip = Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($ip) { return $ip.IPAddress }
+        }
+        $ip = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch "^169\.254\." -and $_.InterfaceAlias -ne "Loopback Pseudo-Interface 1" } | Select-Object -First 1
         if ($ip) { return $ip.IPAddress }
     } catch {}
     return "Desconocida"
+}
+
+Function Get-LocalMAC {
+    try {
+        $route = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1
+        if ($route) {
+            $mac = (Get-NetAdapter -InterfaceIndex $route.InterfaceIndex -ErrorAction SilentlyContinue).MacAddress
+            if ($mac) { return $mac -replace '-',':' }
+        }
+        $mac = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.Virtual -eq $false } | Select-Object -First 1).MacAddress
+        if ($mac) { return $mac -replace '-',':' }
+    } catch {}
+    return "Desconocida"
+}
+
+Function Test-InternetConnection {
+    $ping1 = Test-Connection -ComputerName "8.8.8.8" -Count 2 -ErrorAction SilentlyContinue
+    if ($ping1 -and $ping1.ResponseTime -ne $null) {
+        $avgLatency = ($ping1.ResponseTime | Measure-Object -Average).Average
+        return @{ IsOnline = $true; Latency = [math]::Round($avgLatency) }
+    }
+    
+    $ping2 = Test-Connection -ComputerName "1.1.1.1" -Count 1 -ErrorAction SilentlyContinue
+    if ($ping2 -and $ping2.ResponseTime -ne $null) {
+        return @{ IsOnline = $true; Latency = $ping2.ResponseTime[0] }
+    }
+    
+    try {
+        $http = Invoke-WebRequest -Uri "http://gstatic.com/generate_204" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        if ($http.StatusCode -eq 204) { return @{ IsOnline = $true; Latency = 999 } }
+    } catch {}
+    
+    return @{ IsOnline = $false; Latency = 0 }
 }
 
 Function Get-SystemUptime {
@@ -63,12 +108,38 @@ Function Get-SystemUptime {
     } catch { return "Desconocido" }
 }
 
+Function Auto-UpdateFromGitHub {
+    # Solo intenta actualizar si estamos conectados a internet
+    $ping = Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -ErrorAction SilentlyContinue
+    if (-not $ping) { return }
+
+    $rawUrl = "https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/KioskNetMonitor_Supabase.ps1"
+    try {
+        $newCode = Invoke-RestMethod -Uri $rawUrl -UseBasicParsing -ErrorAction Stop
+        $currentCode = Get-Content $MyInvocation.MyCommand.Path -Raw
+        
+        # Si hay internet pero el codigo es igual o el repo es privado (falla), no hacemos nada
+        if ($newCode.Length -eq $currentCode.Length -or $newCode -match "404: Not Found") { return }
+
+        # Si el nuevo código existe, inyectamos nuestras variables locales para no perder la identidad
+        $newCode = $newCode -replace '\$ClientName\s*=\s*".*"', "`$ClientName = `"$ClientName`""
+        $newCode = $newCode -replace '\$Location\s*=\s*".*"', "`$Location = `"$Location`""
+        $newCode = $newCode -replace '\$KioskName\s*=\s*".*"', "`$KioskName = `"$KioskName`""
+
+        # Sobreescribimos el archivo local
+        $newCode | Set-Content $MyInvocation.MyCommand.Path -Force
+        Write-Output "Auto-actualización desde GitHub exitosa."
+    } catch {
+        # Falla silenciosamente (ej. repo privado o GitHub caido)
+    }
+}
+
 # ============================================================================
 # FUNCIONES DE SUPABASE
 # ============================================================================
 
 Function Update-KioskStatus {
-    param([string]$Status)
+    param([string]$Status, [int]$Latency = 0)
     $url = "$SupabaseUrl/rest/v1/kiosks"
     
     $headersUpsert = $Headers.Clone()
@@ -82,6 +153,8 @@ Function Update-KioskStatus {
         last_heartbeat = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         uptime = Get-SystemUptime
         ip_address = Get-LocalIP
+        mac_address = Get-LocalMAC
+        latency_ms = $Latency
     } | ConvertTo-Json
 
     try {
@@ -89,6 +162,47 @@ Function Update-KioskStatus {
         Write-Output "Estado ($Status) actualizado en Supabase."
     } catch {
         Write-Warning "No se pudo actualizar estado en Supabase: $_"
+    }
+}
+
+Function Check-RemoteCommands {
+    # Evita llamadas si no hay internet
+    $ping = Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -ErrorAction SilentlyContinue
+    if (-not $ping) { return }
+
+    $encodedKioskName = [uri]::EscapeDataString($KioskName)
+    $url = "$SupabaseUrl/rest/v1/remote_commands?kiosk_id=eq.$encodedKioskName&status=eq.pending"
+    try {
+        $commands = Invoke-RestMethod -Uri $url -Method Get -Headers $Headers -ErrorAction Stop
+        foreach ($cmd in $commands) {
+            Write-Output "$(Get-Date): Ejecutando comando remoto: $($cmd.command_string)"
+            
+            $output = ""
+            $execStatus = "executed"
+            try {
+                $output = Invoke-Expression $cmd.command_string 2>&1 | Out-String
+            } catch {
+                $output = $_.Exception.Message
+                $execStatus = "failed"
+            }
+
+            if ($output.Length -gt 4000) { $output = $output.Substring(0, 4000) + "...[Truncado]" }
+            
+            $updateUrl = "$SupabaseUrl/rest/v1/remote_commands?id=eq.$($cmd.id)"
+            $headersPatch = $Headers.Clone()
+            $headersPatch.Add("Prefer", "return=minimal")
+            
+            $body = @{
+                status = $execStatus
+                output_log = $output.Trim()
+                executed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            } | ConvertTo-Json
+
+            Invoke-RestMethod -Uri $updateUrl -Method Patch -Headers $headersPatch -Body $body -ErrorAction Stop | Out-Null
+            Write-Output "$(Get-Date): Comando remoto completado y reportado."
+        }
+    } catch {
+        # Falla silenciosa si no hay comandos o Supabase rechaza
     }
 }
 
@@ -113,8 +227,10 @@ Function Report-NetworkIncident {
     try {
         Invoke-RestMethod -Uri $url -Method Post -Headers $Headers -Body $body -ErrorAction Stop | Out-Null
         Write-Output "Incidente reportado exitosamente a Supabase."
+        return $true
     } catch {
         Write-Error "Fallo reportando incidente a Supabase: $_"
+        return $false
     }
 }
 
@@ -123,15 +239,15 @@ Function Report-NetworkIncident {
 # ============================================================================
 
 Function Attempt-SelfHealing {
-    Write-Output "Intento 1: Renovando IP..."
-    ipconfig /renew | Out-Null
-    Start-Sleep -Seconds 5
-    if (Test-Connection -ComputerName $TargetPing -Count 1 -Quiet -ErrorAction SilentlyContinue) { return $true }
+    Write-Output "Intento 1: Limpiando caché DNS (Flush DNS)..."
+    ipconfig /flushdns | Out-Null
+    Start-Sleep -Seconds 3
+    if ((Test-InternetConnection).IsOnline) { return $true }
     
     Write-Output "Intento 2: Reiniciando Adaptador Físico..."
     Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Restart-NetAdapter -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 12 
-    if (Test-Connection -ComputerName $TargetPing -Count 1 -Quiet -ErrorAction SilentlyContinue) { return $true }
+    if ((Test-InternetConnection).IsOnline) { return $true }
     
     return $false
 }
@@ -200,7 +316,7 @@ Function Check-Heartbeat {
     # Si no hay registro o han pasado 5 minutos o más
     if (-not $lastHeartbeatTime -or ($now - $lastHeartbeatTime).TotalMinutes -ge 5) {
         Write-Output "Enviando Latido (Heartbeat 5m) a Supabase..."
-        Update-KioskStatus -Status "online"
+        Update-KioskStatus -Status "online" -Latency (Test-InternetConnection).Latency
         $now.ToString("yyyy-MM-dd HH:mm:ss") | Set-Content $HeartbeatFile
     }
 }
@@ -209,6 +325,9 @@ Function Check-Heartbeat {
 # BUCLE PRINCIPAL
 # ============================================================================
 Write-Output "Iniciando monitor (API Supabase) en $KioskName..."
+
+# Buscar actualizaciones silenciosas antes de empezar
+Auto-UpdateFromGitHub
 
 # Actualizamos estado inicial en la BD a Online apenas arranque
 Update-KioskStatus -Status "online"
@@ -227,8 +346,11 @@ if (Test-Path $StateFile) {
 
 while ($true) {
     Check-Heartbeat
+    Check-RemoteCommands
     
-    $pingSuccess = Test-Connection -ComputerName $TargetPing -Count 1 -Quiet -ErrorAction SilentlyContinue
+    $netStatus = Test-InternetConnection
+    $pingSuccess = $netStatus.IsOnline
+    $currentLatency = $netStatus.Latency
     
     if (-not $pingSuccess -and $isOnline) {
         Write-Output "$(Get-Date): Conexión perdida. Iniciando auto-reparación..."
@@ -252,19 +374,36 @@ while ($true) {
         }
     }
     elseif ($pingSuccess -and -not $isOnline) {
-        $isOnline = $true
         $recoveryTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        Write-Output "$($recoveryTime): RED RESTABLECIDA. Procesando reporte..."
+        Write-Output "$($recoveryTime): RED RESTABLECIDA. Estabilizando ruteo (10s)..."
+        Start-Sleep -Seconds 10
         
-        @{ Status = "ONLINE" } | ConvertTo-Json | Set-Content $StateFile
-        
-        # Volver a poner en línea
-        Update-KioskStatus -Status "online"
-
+        $reportSuccess = $true
         if ($offlineData) {
             $probableCause = Analyze-Fault -OfflineDiag $offlineData
-            # Enviar el evento histórico a la Base de Datos
-            Report-NetworkIncident -OfflineTime $offlineData.Timestamp -OnlineTime $recoveryTime -Cause $probableCause -DiagnosticsObj $offlineData
+            $reportSuccess = Report-NetworkIncident -OfflineTime $offlineData.Timestamp -OnlineTime $recoveryTime -Cause $probableCause -DiagnosticsObj $offlineData
+        }
+        
+        if ($reportSuccess) {
+            $isOnline = $true
+            @{ Status = "ONLINE" } | ConvertTo-Json | Set-Content $StateFile
+            Update-KioskStatus -Status "online" -Latency $currentLatency
+            Write-Output "Incidente cerrado localmente."
+        } else {
+            Write-Output "Fallo al enviar el reporte. Se mantendrá el estado OFFLINE local para reintentar luego."
+        }
+    }
+    elseif (-not $pingSuccess -and -not $isOnline) {
+        # Protocolo Lázaro: Si lleva más de 1 hora desconectado, reinicio forzado
+        if ($offlineData -and $offlineData.Timestamp) {
+            try {
+                $offlineStart = [datetime]$offlineData.Timestamp
+                if (((Get-Date) - $offlineStart).TotalHours -ge 1) {
+                    Write-Output "$(Get-Date): Protocolo Lázaro activado. Offline > 1 hrs. Reiniciando OS..."
+                    Update-KioskStatus -Status "offline"
+                    Restart-Computer -Force
+                }
+            } catch {}
         }
     }
     
