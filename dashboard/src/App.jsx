@@ -617,7 +617,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter -Physical | Restart-NetAdapter')}>Reiniciar Red</button>
-                <button className="quick-cmd-btn" onClick={() => sendCommand("Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Start-Process powershell.exe -ArgumentList '-WindowStyle Hidden -Command Start-Sleep 3; Stop-ScheduledTask Enlace360_Agent -ErrorAction SilentlyContinue; Start-Sleep 2; Start-ScheduledTask Enlace360_Agent'")}>Actualizar Agente</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand("Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Write-Output 'Descarga completada. El agente detectara el cambio y se reiniciara automaticamente.'")}>Actualizar Agente</button>
                 <button className="quick-cmd-btn danger" onClick={() => { if(window.confirm('¿Forzar reinicio del kiosco?')) sendCommand('Restart-Computer -Force') }}>Reiniciar PC</button>
               </div>
 

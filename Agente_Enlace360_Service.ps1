@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.1"
+$AgentVersion = "v3.2"
 
 $CheckIntervalSecs = 30      
 $LogDir = "C:\KioskNetMonitor"
@@ -334,6 +334,24 @@ Function Check-Heartbeat {
 Write-Log "=== INICIANDO AGENTE ENLACE360 ($AgentVersion) EN MODO DEMONIO ==="
 Write-Log "Kiosco: $KioskName | Ubicacion: $Location | Cliente: $ClientName"
 
+$ScriptPath = $MyInvocation.MyCommand.Path
+$StartupHash = (Get-FileHash $ScriptPath -Algorithm MD5).Hash
+Write-Log "Hash de arranque: $StartupHash"
+
+Function Check-SelfUpdate {
+    try {
+        $currentHash = (Get-FileHash $ScriptPath -Algorithm MD5).Hash
+        if ($currentHash -ne $StartupHash) {
+            Write-Log "[UPDATE] Archivo del agente modificado (Hash cambio de $StartupHash a $currentHash). Aplicando hot-swap..."
+            Update-KioskStatus -Status "online"
+            $restartCmd = "Start-Sleep -Seconds 3; Stop-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Start-ScheduledTask -TaskName 'Enlace360_Agent'"
+            Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$restartCmd`""
+            Write-Log "[UPDATE] Proceso de reinicio lanzado. Cerrando version antigua..."
+            Exit
+        }
+    } catch {}
+}
+
 Auto-UpdateFromGitHub
 Update-KioskStatus -Status "online"
 
@@ -357,6 +375,7 @@ if (Test-Path $StateFile) {
 while ($true) {
     Check-Heartbeat
     Check-RemoteCommands
+    Check-SelfUpdate
     
     $netStatus = Test-InternetConnection
     $pingSuccess = $netStatus.IsOnline
