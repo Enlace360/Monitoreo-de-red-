@@ -69,8 +69,8 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       })
 
       if (!res.ok) {
-        const errData = await res.json()
-        throw new Error(`Gemini dice: ${errData.error?.message || res.statusText}`)
+        const errText = await res.text()
+        throw new Error(`HTTP ${res.status} - ${errText}`)
       }
       
       const data = await res.json()
