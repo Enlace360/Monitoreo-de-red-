@@ -6,14 +6,14 @@ import './index.css'
 function App() {
   const [allKiosks, setAllKiosks] = useState([])
   const [allEvents, setAllEvents] = useState([])
-  
+
   const [clients, setClients] = useState([])
   const [selectedClient, setSelectedClient] = useState('Todos')
-  
+
   const [loading, setLoading] = useState(true)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showGlossary, setShowGlossary] = useState(false)
-  
+
   // AI Copilot States
   const [showSettings, setShowSettings] = useState(false)
   const [apiKey, setApiKey] = useState(localStorage.getItem('enlace360_ai_key') || '')
@@ -27,7 +27,7 @@ function App() {
 
   const analyzeWithAI = async (event) => {
     if (!apiKey) {
-      alert('Primero debes configurar tu Llave de OpenAI en los Ajustes.')
+      alert('Primero debes configurar tu Llave de Google Gemini en los Ajustes.')
       setShowSettings(true)
       return
     }
@@ -36,7 +36,7 @@ function App() {
     setAiResponse(null)
 
     const kioscosMismaSucursal = allKiosks.filter(k => k.location === event.location && k.kiosk_id !== event.kiosk_id)
-    const estadoSucursal = kioscosMismaSucursal.length > 0 
+    const estadoSucursal = kioscosMismaSucursal.length > 0
       ? kioscosMismaSucursal.map(k => `Kiosco ${k.kiosk_id}: ${k.status}`).join(', ')
       : 'No hay otros kioscos registrados en esta sucursal.'
 
@@ -53,22 +53,28 @@ Contexto de la Sucursal: ${estadoSucursal}
 Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué significa esto y qué acciones inmediatas debe tomar. Sé muy breve (máximo 4 líneas) y directo. No saludes.`
 
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3
+          contents: [{
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            temperature: 0.3
+          }
         })
       })
 
-      if (!res.ok) throw new Error('Error al conectar con OpenAI. Revisa tu llave API.')
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(`Gemini dice: ${errData.error?.message || res.statusText}`)
+      }
+      
       const data = await res.json()
-      setAiResponse(data.choices[0].message.content)
+      setAiResponse(data.candidates[0].content.parts[0].text)
     } catch (err) {
       setAiResponse(`Error: ${err.message}`)
     } finally {
@@ -80,19 +86,19 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
     if (allEvents.length === 0) return;
     const headers = ['Kiosco', 'Cliente', 'Sucursal', 'Causa Probable', 'Fecha Caída', 'Fecha Recuperación', 'Estado'];
     const rows = allEvents.map(e => [
-      e.kiosk_id, 
-      e.client_name, 
-      e.location || 'Sede Principal', 
-      e.probable_cause, 
-      new Date(e.offline_time).toLocaleString(), 
+      e.kiosk_id,
+      e.client_name,
+      e.location || 'Sede Principal',
+      e.probable_cause,
+      new Date(e.offline_time).toLocaleString(),
       e.online_time ? new Date(e.online_time).toLocaleString() : 'Aún Caído',
       e.online_time ? 'Recuperado' : 'Crítico'
     ]);
-    
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + headers.join(",") + "\n" 
+
+    const csvContent = "data:text/csv;charset=utf-8,"
+      + headers.join(",") + "\n"
       + rows.map(e => e.map(cell => `"${cell}"`).join(",")).join("\n");
-      
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -108,7 +114,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
     const kioskSubscription = supabase
       .channel('kiosks-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'kiosks' }, payload => {
-        fetchData() 
+        fetchData()
       })
       .subscribe()
 
@@ -128,7 +134,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
         .from('kiosks')
         .select('*')
         .order('kiosk_id', { ascending: true })
-      
+
       const { data: eventsData, error: eventsError } = await supabase
         .from('network_events')
         .select('*')
@@ -149,7 +155,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
           if (minutesSince > 6) {
             return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
           }
-          
+
           if (kiosk.latency_ms && kiosk.latency_ms > 500) {
             return { ...kiosk, status: 'degraded', uptime: `${kiosk.latency_ms}ms (Lento)` }
           }
@@ -160,9 +166,9 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       if (finalKiosks.length === 0) {
         finalKiosks = []
         finalEvents = []
-        
+
         const malls = ['Mall La Reina', 'Mall La Florida', 'Mall La Dehesa']
-        
+
         malls.forEach((mall, mallIndex) => {
           // Generamos 10 equipos por sucursal
           for (let i = 1; i <= 10; i++) {
@@ -170,7 +176,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             const isOffline = (i === 3 || (i === 7 && mallIndex !== 2))
             const kioskPrefix = mall.replace('Mall La ', '').toUpperCase()
             const kioskId = `TOTEM-${kioskPrefix}-${i.toString().padStart(2, '0')}`
-            
+
             finalKiosks.push({
               kiosk_id: kioskId,
               client_name: 'Cenco Malls',
@@ -178,7 +184,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               status: isOffline ? 'offline' : 'online',
               uptime: isOffline ? 'Desconocido' : `${Math.floor(Math.random() * 14) + 1} días, ${Math.floor(Math.random() * 12)} horas`
             })
-            
+
             if (isOffline) {
               const cause = i === 3 ? 'CABLE DESCONECTADO O PUERTO APAGADO (Falla de Capa 1)' : 'GATEWAY INACCESIBLE. Posible falla de switch/router.';
               finalEvents.push({
@@ -209,7 +215,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
 
       const uniqueClients = [...new Set(finalKiosks.map(k => k.client_name))]
       setClients(uniqueClients)
-      
+
       // Si solo hay un cliente, autoseleccionarlo en lugar de 'Todos' para mejor UX
       if (uniqueClients.length === 1 && selectedClient === 'Todos') {
         setSelectedClient(uniqueClients[0])
@@ -251,14 +257,14 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       <header className="header">
         <div className="brand-container">
           <img src="/logo.png" alt="Enlace 360" className="brand-logo" onError={(e) => {
-            e.target.style.display='none';
-            e.target.nextSibling.style.display='block';
+            e.target.style.display = 'none';
+            e.target.nextSibling.style.display = 'block';
           }} />
           <h1 style={{ display: 'none', margin: 0, color: 'var(--brand-cyan)' }}>ENLACE 360</h1>
-          
-          <select 
-            className="client-selector" 
-            value={selectedClient} 
+
+          <select
+            className="client-selector"
+            value={selectedClient}
             onChange={(e) => setSelectedClient(e.target.value)}
           >
             <option value="Todos">Todos los Clientes ({allKiosks.length})</option>
@@ -267,9 +273,9 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             ))}
           </select>
         </div>
-        
+
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <button 
+          <button
             onClick={() => setShowSettings(true)}
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-muted)', padding: '8px', borderRadius: '50%', cursor: 'pointer', display: 'flex', transition: 'all 0.2s' }}
             title="Configuración IA"
@@ -316,13 +322,13 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       <div className="dashboard-layout">
         <main className="glass-panel main-panel">
           <h2 className="panel-title"><Monitor size={22} color="var(--brand-cyan)" /> Flota de Kioscos</h2>
-          
+
           <div className="locations-container">
             {Object.entries(kiosksByLocation).map(([location, groupKiosks]) => (
               <div key={location} className="location-group">
                 <h3 className="location-title">
-                  <MapPin size={18} color="var(--brand-cyan)" /> 
-                  {location} 
+                  <MapPin size={18} color="var(--brand-cyan)" />
+                  {location}
                   <span className="location-count">({groupKiosks.length})</span>
                 </h3>
                 <div className="kiosk-grid">
@@ -347,14 +353,14 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h2 className="panel-title" style={{ margin: 0 }}><AlertTriangle size={22} color="var(--status-warning)" /> Últimas Caídas</h2>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button 
+              <button
                 onClick={() => setShowGlossary(true)}
                 style={{ background: 'transparent', border: '1px solid var(--text-muted)', color: 'var(--text-muted)', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
                 title="Ver diccionario de fallas"
               >
                 <HelpCircle size={14} /> Diccionario
               </button>
-              <button 
+              <button
                 onClick={exportToCSV}
                 style={{ background: 'transparent', border: '1px solid var(--brand-cyan)', color: 'var(--brand-cyan)', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem' }}
                 title="Descargar Reporte CSV para SLA"
@@ -372,12 +378,12 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               filteredEvents.map((ev, idx) => (
                 <div key={idx} className="event-item" onClick={() => setSelectedEvent(ev)}>
                   <div className="event-header">
-                    <span className="event-kiosk"><ShieldAlert size={16} color="var(--status-offline)"/> {ev.kiosk_id}</span>
+                    <span className="event-kiosk"><ShieldAlert size={16} color="var(--status-offline)" /> {ev.kiosk_id}</span>
                     <span className="event-time">
-                      {new Date(ev.offline_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {new Date(ev.offline_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  <div className="event-location"><MapPin size={12}/> {ev.location || 'Sede Principal'}</div>
+                  <div className="event-location"><MapPin size={12} /> {ev.location || 'Sede Principal'}</div>
                   <p className="event-cause">{ev.probable_cause}</p>
                 </div>
               ))
@@ -403,7 +409,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                     <strong>Cliente:</strong> {selectedEvent.client_name}
                   </span>
                   <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <MapPin size={14}/> {selectedEvent.location || 'Sede Principal'}
+                    <MapPin size={14} /> {selectedEvent.location || 'Sede Principal'}
                   </span>
                 </div>
               </div>
@@ -427,13 +433,13 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               {selectedEvent.diagnostics && Object.keys(selectedEvent.diagnostics).length > 0 && (
                 <div className="alibi-section">
                   <h3><Network size={20} /> Diagnóstico Forense de Red</h3>
-                  
+
                   {selectedEvent.diagnostics.Adapters && (
                     <div style={{ marginBottom: '1.5rem' }}>
                       <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Estado de Tarjetas de Red (Físico):</p>
                       {selectedEvent.diagnostics.Adapters.map((a, i) => (
                         <div key={i} style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px', marginBottom: '5px' }}>
-                          <strong>{a.Name}:</strong> {a.InterfaceDescription} 
+                          <strong>{a.Name}:</strong> {a.InterfaceDescription}
                           <span className={`status-badge ${a.Status?.toLowerCase()}`} style={{ float: 'right' }}>
                             {a.Status}
                           </span>
@@ -445,7 +451,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                   <div style={{ marginBottom: '1.5rem' }}>
                     <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Conectividad Local (Gateway):</p>
                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px' }}>
-                      <strong>IP del Router Local:</strong> {selectedEvent.diagnostics.GatewayIP || 'No detectada'} <br/>
+                      <strong>IP del Router Local:</strong> {selectedEvent.diagnostics.GatewayIP || 'No detectada'} <br />
                       <strong>Conexión con el Router:</strong> {selectedEvent.diagnostics.GatewayReachable ? '✅ Responde (El cable local está bien)' : '❌ No responde'}
                     </div>
                   </div>
@@ -460,13 +466,13 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                   </div>
                 </div>
               )}
-              
+
               {/* IA COPILOT SECTION */}
               <div className="alibi-section" style={{ borderColor: 'rgba(0, 163, 218, 0.4)', background: 'linear-gradient(180deg, rgba(0, 163, 218, 0.05) 0%, rgba(0, 163, 218, 0) 100%)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                   <h3 style={{ color: 'var(--brand-cyan)', margin: 0 }}><Sparkles size={20} /> Copiloto IA de Soporte</h3>
                   {!aiLoading && !aiResponse && (
-                    <button 
+                    <button
                       onClick={() => analyzeWithAI(selectedEvent)}
                       style={{ background: 'var(--brand-cyan)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px var(--brand-cyan-glow)' }}
                     >
@@ -474,14 +480,14 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                     </button>
                   )}
                 </div>
-                
+
                 {aiLoading && (
                   <div style={{ padding: '20px', textAlign: 'center', color: 'var(--brand-cyan)' }}>
                     <div className="spinner" style={{ margin: '0 auto 10px auto', width: '24px', height: '24px', borderTopColor: 'var(--brand-cyan)' }}></div>
                     <p style={{ margin: 0, fontWeight: '500' }}>El Copiloto está analizando los logs...</p>
                   </div>
                 )}
-                
+
                 {aiResponse && (
                   <div style={{ background: 'rgba(0,0,0,0.4)', padding: '15px', borderRadius: '8px', borderLeft: '4px solid var(--brand-cyan)' }}>
                     <p style={{ margin: 0, fontSize: '1rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
@@ -490,7 +496,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                   </div>
                 )}
               </div>
-              
+
             </div>
           </div>
         </div>
@@ -508,7 +514,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
                 Este diccionario explica los diagnósticos forenses automáticos que realiza el Agente de Red y qué acciones debe tomar el equipo de soporte en cada caso.
               </p>
-              
+
               <div className="alibi-section">
                 <h3 style={{ color: 'var(--status-offline)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>🔌 CABLE DESCONECTADO O PUERTO APAGADO (Capa 1)</h3>
                 <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> El kiosco detectó que el cable de red físico fue desconectado, dañado, o que el switch al que está conectado se quedó sin energía.</p>
@@ -559,21 +565,21 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             </div>
             <div className="modal-body">
               <p style={{ color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
-                Para habilitar el <strong>Copiloto IA</strong>, ingresa tu llave de la API de OpenAI. Esta llave se guardará exclusivamente en tu navegador de forma segura y nunca se enviará a nuestros servidores.
+                Para habilitar el <strong>Copiloto IA</strong>, ingresa tu llave de la API de Google Gemini (es 100% gratuita). Esta llave se guardará exclusivamente en tu navegador de forma segura.
               </p>
-              
+
               <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>OpenAI API Key (sk-...)</label>
-                <input 
-                  type="password" 
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>Google Gemini API Key</label>
+                <input
+                  type="password"
                   value={apiKey}
                   onChange={(e) => saveApiKey(e.target.value)}
-                  placeholder="sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx"
+                  placeholder="AIzaSyBxxxxxxxxxxxxxxxxxxxxxxxx"
                   style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '8px', outline: 'none', fontFamily: 'monospace' }}
                 />
               </div>
-              
-              <button 
+
+              <button
                 onClick={() => setShowSettings(false)}
                 style={{ width: '100%', background: 'var(--brand-cyan)', color: 'white', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
               >
