@@ -343,9 +343,9 @@ function App() {
                 )}
               </div>
 
-              {selectedEvent.diagnostics && (
+              {selectedEvent.diagnostics && Object.keys(selectedEvent.diagnostics).length > 0 && (
                 <div className="alibi-section">
-                  <h3><Network size={20} /> Evidencia Técnica (El "Alibi")</h3>
+                  <h3><Network size={20} /> Diagnóstico Forense de Red</h3>
                   
                   {selectedEvent.diagnostics.Adapters && (
                     <div style={{ marginBottom: '1.5rem' }}>
@@ -364,20 +364,19 @@ function App() {
                   <div style={{ marginBottom: '1.5rem' }}>
                     <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Conectividad Local (Gateway):</p>
                     <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px' }}>
-                      <strong>IP del Router Local:</strong> {selectedEvent.diagnostics.GatewayIP || 'Desconocida'} <br/>
-                      <strong>Llega al Router:</strong> {selectedEvent.diagnostics.GatewayReachable ? '✅ Sí' : '❌ No'}
+                      <strong>IP del Router Local:</strong> {selectedEvent.diagnostics.GatewayIP || 'No detectada'} <br/>
+                      <strong>Conexión con el Router:</strong> {selectedEvent.diagnostics.GatewayReachable ? '✅ Responde (El cable local está bien)' : '❌ No responde'}
                     </div>
                   </div>
 
                   <div>
-                    <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>JSON Raw (Para Soporte Nivel 3):</p>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '10px' }}>Registro Completo del Sistema (Raw JSON):</p>
                     <div className="code-block">
                       <pre style={{ margin: 0 }}>
                         {JSON.stringify(selectedEvent.diagnostics, null, 2)}
                       </pre>
                     </div>
                   </div>
-
                 </div>
               )}
             </div>
