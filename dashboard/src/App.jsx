@@ -53,18 +53,16 @@ Contexto de la Sucursal: ${estadoSucursal}
 Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué significa esto y qué acciones inmediatas debe tomar. Sé muy breve (máximo 4 líneas) y directo. No saludes.`
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/chat/completions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.3
-          }
+          model: 'gemini-1.5-flash',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3
         })
       })
 
@@ -74,7 +72,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       }
       
       const data = await res.json()
-      setAiResponse(data.candidates[0].content.parts[0].text)
+      setAiResponse(data.choices[0].message.content)
     } catch (err) {
       setAiResponse(`Error: ${err.message}`)
     } finally {
