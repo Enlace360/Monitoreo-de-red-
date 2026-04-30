@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
-import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles } from 'lucide-react'
+import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles, Terminal, Send } from 'lucide-react'
 import './index.css'
 
 function App() {
@@ -19,6 +19,11 @@ function App() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('enlace360_ai_key') || '')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResponse, setAiResponse] = useState(null)
+
+  // Remote Commands (C2) States
+  const [terminalKiosk, setTerminalKiosk] = useState(null)
+  const [remoteCommands, setRemoteCommands] = useState([])
+  const [commandInput, setCommandInput] = useState('')
 
   const saveApiKey = (key) => {
     setApiKey(key)
@@ -70,6 +75,39 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       setAiLoading(false)
     }
   }
+
+  // C2 Functions
+  const fetchRemoteCommands = async (kioskId) => {
+    const { data, error } = await supabase
+      .from('remote_commands')
+      .select('*')
+      .eq('kiosk_id', kioskId)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    if (!error && data) setRemoteCommands(data)
+  }
+
+  const sendCommand = async (cmdString) => {
+    if (!cmdString.trim() || !terminalKiosk) return
+    const { error } = await supabase
+      .from('remote_commands')
+      .insert([{ kiosk_id: terminalKiosk, command_string: cmdString, status: 'pending' }])
+    if (!error) {
+      setCommandInput('')
+      fetchRemoteCommands(terminalKiosk)
+    } else {
+      alert("Error enviando comando: " + error.message)
+    }
+  }
+
+  useEffect(() => {
+    let interval;
+    if (terminalKiosk) {
+      fetchRemoteCommands(terminalKiosk)
+      interval = setInterval(() => fetchRemoteCommands(terminalKiosk), 5000)
+    }
+    return () => clearInterval(interval)
+  }, [terminalKiosk])
 
   const exportToCSV = () => {
     if (allEvents.length === 0) return;
@@ -322,14 +360,29 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                 </h3>
                 <div className="kiosk-grid">
                   {groupKiosks.map((kiosk, idx) => (
-                    <div key={idx} className={`kiosk-card ${kiosk.status}`}>
+                    <div key={idx} className={`kiosk-card ${kiosk.status}`} style={{ position: 'relative' }}>
                       <div className="status-indicator"></div>
+                      {kiosk.script_version && (
+                        <span style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)', fontSize: '0.65rem', padding: '2px 6px', borderRadius: '10px', fontWeight: 'bold' }}>
+                          {kiosk.script_version}
+                        </span>
+                      )}
                       <div className="kiosk-name">{kiosk.kiosk_id}</div>
                       <div className="kiosk-uptime">{kiosk.uptime || 'Iniciando...'}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(0,0,0,0.15)', padding: '5px', borderRadius: '4px' }}>
                         <span>IP: {kiosk.ip_address || 'Desconocida'}</span>
                         {kiosk.mac_address && <span>MAC: {kiosk.mac_address}</span>}
                       </div>
+                      <button 
+                        className="terminal-btn"
+                        onClick={(e) => { e.stopPropagation(); setTerminalKiosk(kiosk.kiosk_id) }}
+                        style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', opacity: 0.7, padding: '5px' }}
+                        title="Abrir Terminal Remota"
+                        onMouseOver={(e) => { e.currentTarget.style.color = 'var(--brand-cyan)'; e.currentTarget.style.opacity = 1 }}
+                        onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.opacity = 0.7 }}
+                      >
+                        <Terminal size={18} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -538,6 +591,62 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                 <h3 style={{ color: 'var(--status-online)', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 10px 0' }}>✅ AUTO-REPARADO (Micro-corte)</h3>
                 <p style={{ margin: '0 0 5px 0' }}><strong>Qué significa:</strong> Hubo una pérdida temporal de paquetes (muy común en Wi-Fi o ruido eléctrico), pero el Agente aplicó un reinicio interno de las tarjetas y revivió la conexión en milisegundos.</p>
                 <p style={{ margin: 0 }}><strong>Qué hacer:</strong> ¡Nada! Es solo evidencia de que el Agente está trabajando y salvó el día.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE TERMINAL C2 */}
+      {terminalKiosk && (
+        <div className="modal-overlay" onClick={() => setTerminalKiosk(null)}>
+          <div className="modal-content terminal-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%', background: '#0a0a0a' }}>
+            <div className="modal-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '15px' }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--brand-cyan)', margin: 0 }}>
+                <Terminal size={24} /> 
+                Terminal Remota: {terminalKiosk}
+              </h2>
+              <button className="close-btn" onClick={() => setTerminalKiosk(null)}><X size={24} /></button>
+            </div>
+            
+            <div className="modal-body" style={{ padding: '20px 0 0 0' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
+                <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter | Restart-NetAdapter')}>Reiniciar Red</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand('Auto-UpdateFromGitHub')}>Actualizar Agente</button>
+                <button className="quick-cmd-btn danger" onClick={() => { if(window.confirm('¿Forzar reinicio del kiosco?')) sendCommand('Restart-Computer -Force') }}>Reiniciar PC</button>
+              </div>
+
+              <div className="terminal-logs">
+                {remoteCommands.length === 0 ? (
+                  <div style={{ color: 'rgba(255,255,255,0.3)', textAlign: 'center', marginTop: '40px' }}>No hay comandos recientes. Escribe un comando para empezar.</div>
+                ) : (
+                  remoteCommands.map(cmd => (
+                    <div key={cmd.id} className="terminal-entry">
+                      <div className="cmd-prompt"><span style={{color:'var(--brand-cyan)'}}>root@{terminalKiosk}:~#</span> {cmd.command_string}</div>
+                      <div className="cmd-meta">Estado: <span className={`status-badge ${cmd.status}`}>{cmd.status.toUpperCase()}</span> | Enviado: {new Date(cmd.created_at).toLocaleTimeString()}</div>
+                      {cmd.output_log && (
+                        <pre className="cmd-output">{cmd.output_log}</pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="terminal-input-container">
+                <span style={{ color: 'var(--brand-cyan)', fontWeight: 'bold' }}>$</span>
+                <input 
+                  type="text" 
+                  className="terminal-input"
+                  value={commandInput}
+                  onChange={(e) => setCommandInput(e.target.value)}
+                  onKeyDown={(e) => { if(e.key === 'Enter') sendCommand(commandInput) }}
+                  placeholder="Escribe un comando PowerShell..."
+                  autoFocus
+                />
+                <button onClick={() => sendCommand(commandInput)} className="terminal-send-btn">
+                  <Send size={18} />
+                </button>
               </div>
             </div>
           </div>
