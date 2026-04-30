@@ -254,6 +254,10 @@ function App() {
                       <div className="status-indicator"></div>
                       <div className="kiosk-name">{kiosk.kiosk_id}</div>
                       <div className="kiosk-uptime">{kiosk.uptime || 'Iniciando...'}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(0,0,0,0.15)', padding: '5px', borderRadius: '4px' }}>
+                        <span>IP: {kiosk.ip_address || 'Desconocida'}</span>
+                        {kiosk.mac_address && <span>MAC: {kiosk.mac_address}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
