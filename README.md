@@ -89,6 +89,8 @@ C:\Enlace360_SYSTEM_Diagnostico_*.zip
 
 Incluye tareas, procesos, logs, red, eventos de Windows, powercfg, estado local, fila Supabase y comandos pendientes.
 
+Si las tareas `Enlace360_Agent` o `Enlace360_HealthCheck` desaparecen, no reinstalar primero. Ejecutar el diagnostico y guardar el ZIP antes de reparar. El diagnostico captura evidencia forense de Task Scheduler, Security Audit, PowerShell, sesiones remotas, Defender/EDR y comandos C2 recientes para distinguir borrado manual/remoto, politica/antivirus o falla de instalacion.
+
 ## Actualizacion Desde Dashboard
 
 El dashboard envia un comando C2 que descarga:

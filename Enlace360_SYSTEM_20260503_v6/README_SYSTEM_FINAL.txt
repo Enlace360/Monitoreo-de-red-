@@ -33,6 +33,15 @@ Diagnostico de equipo offline/apagado:
 2. Enviar el ZIP generado:
    C:\Enlace360_SYSTEM_Diagnostico_*.zip
 
+Diagnostico si desaparecen las tareas:
+1. No reinstalar todavia.
+2. Ejecutar primero como Administrador:
+   Diagnosticar_Enlace360_SYSTEM.bat
+3. Revisar en el ZIP las secciones FORENSE TASKSCHEDULER, SECURITY,
+   POWERSHELL, LOGONS REMOTOS, DEFENDER y REMOTE COMMANDS RECIENTES.
+4. Despues de guardar el ZIP, reinstalar con:
+   Instalar_Enlace360_SYSTEM.bat
+
 Ruta instalada:
 C:\ProgramData\Enlace360\Agent
 

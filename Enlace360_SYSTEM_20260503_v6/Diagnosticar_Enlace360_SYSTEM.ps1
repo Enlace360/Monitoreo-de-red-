@@ -4,18 +4,21 @@ param(
     [int]$HealthLogTail = 120,
     [int]$C2LogTail = 120,
     [int]$EventMax = 80,
+    [int]$ForensicDays = 14,
+    [int]$EventScanMax = 5000,
     [switch]$RunVerifier,
     [int]$VerifierObserveSeconds = 0
 )
 
 $ErrorActionPreference = "Continue"
-$DiagnosticVersion = "SYSTEM-DIAG-2026-05-03.1"
+$DiagnosticVersion = "SYSTEM-DIAG-2026-05-04.1"
 $TaskAgent = "Enlace360_Agent"
 $TaskHealthCheck = "Enlace360_HealthCheck"
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $OutDir = "C:\Enlace360_SYSTEM_Diagnostico_$Stamp"
 $ReportPath = Join-Path $OutDir "diagnostico.txt"
 $ZipPath = "$OutDir.zip"
+$ForensicStart = (Get-Date).AddDays(-1 * $ForensicDays)
 
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
@@ -121,6 +124,18 @@ function Get-LocalState {
     try { return Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } catch { return $null }
 }
 
+function Select-EventSummary {
+    process {
+        [pscustomobject]@{
+            TimeCreated = $_.TimeCreated
+            Id = $_.Id
+            ProviderName = $_.ProviderName
+            Level = $_.LevelDisplayName
+            Message = (($_.Message -replace "`r?`n", " ") -replace "\s{2,}", " ").Trim()
+        }
+    }
+}
+
 function Add-DiagnosticSummary {
     Add-Section "RESUMEN AUTOMATICO"
     $agentPath = Join-Path $InstallDir "Agente_Enlace360_Service.ps1"
@@ -151,7 +166,9 @@ function Add-DiagnosticSummary {
         Add-Line "network_state.json: no existe o no parsea"
     }
 
-    if (-not (Test-Path -LiteralPath $InstallDir -PathType Container)) {
+    if (-not $agentTask -and -not $healthTask) {
+        Add-Line "Diagnostico probable: TAREAS SYSTEM AUSENTES. Revisar secciones FORENSE para confirmar si hubo borrado manual, C2, EDR o politica."
+    } elseif (-not (Test-Path -LiteralPath $InstallDir -PathType Container)) {
         Add-Line "Diagnostico probable: AGENTE NO INSTALADO EN ESTA RUTA."
     } elseif ($agentProc.Count -lt 1 -and $agentTask) {
         Add-Line "Diagnostico probable: Windows esta vivo, pero el agente no tiene proceso. Revisar HealthCheck y LastTaskResult."
@@ -172,6 +189,7 @@ Add-Line ("Usuario={0}\{1}" -f $env:USERDOMAIN, $env:USERNAME)
 Add-Line ("InstallDir={0}" -f $InstallDir)
 Add-Line ("OutDir={0}" -f $OutDir)
 Add-Line ("RunVerifier={0}" -f $RunVerifier)
+Add-Line ("ForensicStart={0}" -f $ForensicStart.ToString("yyyy-MM-dd HH:mm:ss"))
 
 Add-DiagnosticSummary
 
@@ -185,6 +203,135 @@ Invoke-CaptureBlock "TAREAS PROGRAMADAS" {
 
 Invoke-CaptureBlock "INFO TAREAS PROGRAMADAS" {
     Get-ScheduledTaskInfo Enlace360_Agent,Enlace360_HealthCheck
+}
+
+Invoke-CaptureBlock "FORENSE TAREAS XML" {
+    $taskFiles = @(
+        (Join-Path $env:WINDIR "System32\Tasks\$TaskAgent"),
+        (Join-Path $env:WINDIR "System32\Tasks\$TaskHealthCheck")
+    )
+    foreach ($taskFile in $taskFiles) {
+        if (Test-Path -LiteralPath $taskFile -PathType Leaf) {
+            Get-Item -LiteralPath $taskFile -Force | Select-Object FullName,Length,CreationTime,LastWriteTime,Attributes
+            Get-Acl -LiteralPath $taskFile | Select-Object Path,Owner,AccessToString
+        } else {
+            [pscustomobject]@{ FullName = $taskFile; Exists = $false }
+        }
+    }
+}
+
+Invoke-CaptureBlock "FORENSE TASKSCHEDULER OPERATIONAL ENLACE360" {
+    Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.TimeCreated -ge $ForensicStart -and
+            $_.Message -match "Enlace360|Agente_Enlace360|ProgramData\\Enlace360|KioskNetMonitor"
+        } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE SECURITY SCHEDULED TASKS" {
+    Get-WinEvent -FilterHashtable @{ LogName = "Security"; Id = 4698,4699,4700,4701,4702; StartTime = $ForensicStart } -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object { $_.Message -match "Enlace360|Agente_Enlace360|ProgramData\\Enlace360|KioskNetMonitor" } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE SECURITY PROCESS CREATION" {
+    Get-WinEvent -FilterHashtable @{ LogName = "Security"; Id = 4688; StartTime = $ForensicStart } -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Message -match "schtasks|Register-ScheduledTask|Unregister-ScheduledTask|Stop-ScheduledTask|powershell|pwsh|Enlace360|KioskNetMonitor"
+        } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE POWERSHELL OPERATIONAL" {
+    Get-WinEvent -LogName "Microsoft-Windows-PowerShell/Operational" -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.TimeCreated -ge $ForensicStart -and
+            $_.Message -match "Enlace360|Agente_Enlace360|ProgramData\\Enlace360|KioskNetMonitor|schtasks|Register-ScheduledTask|Unregister-ScheduledTask|Stop-ScheduledTask"
+        } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE WINDOWS POWERSHELL" {
+    Get-WinEvent -LogName "Windows PowerShell" -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.TimeCreated -ge $ForensicStart -and
+            $_.Message -match "Enlace360|Agente_Enlace360|ProgramData\\Enlace360|KioskNetMonitor|schtasks|Register-ScheduledTask|Unregister-ScheduledTask|Stop-ScheduledTask"
+        } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE LOGONS REMOTOS" {
+    Get-WinEvent -FilterHashtable @{ LogName = "Security"; Id = 4624,4625,4634,4647,4648,4672; StartTime = $ForensicStart } -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Message -match "Logon Type:\s+(2|7|10|11)|Tipo de inicio de sesion:\s+(2|7|10|11)|RemoteInteractive|Se le asignaron privilegios especiales|Special privileges|Explicit Credentials|Credenciales explicitas"
+        } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE TERMINAL SERVICES" {
+    foreach ($logName in @(
+        "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
+        "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational"
+    )) {
+        Add-Line "--- $logName ---"
+        Get-WinEvent -LogName $logName -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+            Where-Object { $_.TimeCreated -ge $ForensicStart } |
+            Select-EventSummary |
+            Select-Object -First $EventMax
+    }
+}
+
+Invoke-CaptureBlock "FORENSE HERRAMIENTAS REMOTAS" {
+    $remotePattern = "TeamViewer|AnyDesk|RustDesk|ScreenConnect|ConnectWise|Splashtop|Atera|Ninja|Mesh|VNC|UltraViewer|ChromeRemoteDesktop|DWAgent|Tactical|RemotePC|LogMeIn"
+    Add-Line "--- Servicios ---"
+    Get-Service -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match $remotePattern -or $_.DisplayName -match $remotePattern } |
+        Select-Object Name,DisplayName,Status,StartType
+    Add-Line "--- Programas instalados ---"
+    foreach ($uninstallPath in @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )) {
+        Get-ItemProperty $uninstallPath -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match $remotePattern } |
+            Select-Object DisplayName,DisplayVersion,Publisher,InstallDate,InstallLocation
+    }
+}
+
+Invoke-CaptureBlock "FORENSE DEFENDER ENLACE360" {
+    Add-Line "--- Get-MpThreatDetection ---"
+    if (Get-Command Get-MpThreatDetection -ErrorAction SilentlyContinue) {
+        Get-MpThreatDetection -ErrorAction SilentlyContinue |
+            Where-Object {
+                ($_.Resources -join " ") -match "Enlace360|Agente_Enlace360|ProgramData\\Enlace360|KioskNetMonitor|PowerShell"
+            } |
+            Select-Object ThreatName,ActionSuccess,InitialDetectionTime,LastThreatStatusChangeTime,Resources
+    } else {
+        Add-Line "Get-MpThreatDetection no disponible."
+    }
+    Add-Line "--- Microsoft-Windows-Windows Defender/Operational ---"
+    Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents $EventScanMax -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.TimeCreated -ge $ForensicStart -and
+            $_.Message -match "Enlace360|Agente_Enlace360|ProgramData\\Enlace360|KioskNetMonitor|PowerShell|ScheduledTask|Task Scheduler"
+        } |
+        Select-EventSummary |
+        Select-Object -First $EventMax
+}
+
+Invoke-CaptureBlock "FORENSE AUDIT POLICY" {
+    foreach ($subcategory in @("Other Object Access Events", "Process Creation", "Logon", "Special Logon")) {
+        Add-Line "--- $subcategory ---"
+        auditpol.exe /get /subcategory:$subcategory 2>&1
+    }
 }
 
 Invoke-CaptureBlock "PROCESOS ENLACE360" {
@@ -264,6 +411,18 @@ Invoke-CaptureBlock "SUPABASE REMOTE COMMANDS PENDING" {
     $encoded = [uri]::EscapeDataString([string]$config.KioskName)
     $pending = Invoke-SupabaseJson -Uri "$($supabase.Url)/rest/v1/remote_commands?kiosk_id=eq.$encoded&status=eq.pending&select=id,created_at,command_string,status" -Headers $supabase.Headers
     $pending | ConvertTo-Json -Depth 6
+}
+
+Invoke-CaptureBlock "SUPABASE REMOTE COMMANDS RECIENTES" {
+    $agentPath = Join-Path $InstallDir "Agente_Enlace360_Service.ps1"
+    $configPath = Join-Path $InstallDir "config.json"
+    if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf)) { throw "No existe $agentPath" }
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "No existe $configPath" }
+    $supabase = Read-AgentSupabase -AgentPath $agentPath
+    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $encoded = [uri]::EscapeDataString([string]$config.KioskName)
+    $recent = Invoke-SupabaseJson -Uri "$($supabase.Url)/rest/v1/remote_commands?kiosk_id=eq.$encoded&select=id,created_at,command_string,status,executed_at,output_log&order=created_at.desc&limit=50" -Headers $supabase.Headers
+    $recent | ConvertTo-Json -Depth 6
 }
 
 if ($RunVerifier) {
