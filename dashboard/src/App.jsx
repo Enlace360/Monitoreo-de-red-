@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
-import { Monitor, AlertTriangle, CheckCircle, Activity, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles, Terminal, Send } from 'lucide-react'
+import { Monitor, AlertTriangle, CheckCircle, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles, Terminal, Send } from 'lucide-react'
 import './index.css'
+
+const AGENT_UPDATE_COMMAND = "$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $dir = 'C:\\ProgramData\\Enlace360\\Agent'; $agent = Join-Path $dir 'Agente_Enlace360_Service.ps1'; $cache = Join-Path $dir 'agent_payload.cache'; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile $agent -UseBasicParsing; [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent)) | Set-Content -Path $cache -Encoding ASCII -Force; Write-Output 'Descarga completada. Cache local actualizado.'"
 
 function App() {
   const [allKiosks, setAllKiosks] = useState([])
@@ -77,7 +79,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
   }
 
   // C2 Functions
-  const fetchRemoteCommands = async (kioskId) => {
+  const fetchRemoteCommands = useCallback(async (kioskId) => {
     const { data, error } = await supabase
       .from('remote_commands')
       .select('*')
@@ -85,7 +87,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       .order('created_at', { ascending: false })
       .limit(20)
     if (!error && data) setRemoteCommands(data)
-  }
+  }, [])
 
   const sendCommand = async (cmdString) => {
     if (!cmdString.trim() || !terminalKiosk) return
@@ -101,26 +103,34 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
   }
 
   const updateAllAgents = async () => {
-    if (!window.confirm(`¿Actualizar el agente en ${kiosks.length} kioscos? El cambio se aplicará automáticamente.`)) return
-    const updateCmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Write-Output 'Descarga completada.'"
+    const targetKiosks = filteredKiosks
+    if (targetKiosks.length === 0) {
+      alert('No hay kioscos visibles para actualizar.')
+      return
+    }
+    if (!window.confirm(`¿Actualizar el agente en ${targetKiosks.length} kioscos? El cambio se aplicará automáticamente.`)) return
     let sent = 0
-    for (const kiosk of kiosks) {
+    for (const kiosk of targetKiosks) {
       const { error } = await supabase
         .from('remote_commands')
-        .insert([{ kiosk_id: kiosk.kiosk_id, command_string: updateCmd, status: 'pending' }])
+        .insert([{ kiosk_id: kiosk.kiosk_id, command_string: AGENT_UPDATE_COMMAND, status: 'pending' }])
       if (!error) sent++
     }
-    alert(`Comando de actualización enviado a ${sent}/${kiosks.length} kioscos.`)
+    alert(`Comando de actualización enviado a ${sent}/${targetKiosks.length} kioscos.`)
   }
 
   useEffect(() => {
-    let interval;
+    let interval
+    let initialFetch
     if (terminalKiosk) {
-      fetchRemoteCommands(terminalKiosk)
+      initialFetch = setTimeout(() => fetchRemoteCommands(terminalKiosk), 0)
       interval = setInterval(() => fetchRemoteCommands(terminalKiosk), 5000)
     }
-    return () => clearInterval(interval)
-  }, [terminalKiosk])
+    return () => {
+      clearTimeout(initialFetch)
+      clearInterval(interval)
+    }
+  }, [terminalKiosk, fetchRemoteCommands])
 
   const exportToCSV = () => {
     if (allEvents.length === 0) return;
@@ -148,34 +158,14 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
     document.body.removeChild(link);
   }
 
-  useEffect(() => {
-    fetchData()
-
-    const kioskSubscription = supabase
-      .channel('kiosks-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'kiosks' }, payload => {
-        fetchData()
-      })
-      .subscribe()
-
-    const intervalId = setInterval(() => {
-      fetchData()
-    }, 60000) // Refrescar cada 1 minuto para evaluar heartbeats
-
-    return () => {
-      supabase.removeChannel(kioskSubscription)
-      clearInterval(intervalId)
-    }
-  }, [])
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const { data: kiosksData, error: kiosksError } = await supabase
+      const { data: kiosksData } = await supabase
         .from('kiosks')
         .select('*')
         .order('kiosk_id', { ascending: true })
 
-      const { data: eventsData, error: eventsError } = await supabase
+      const { data: eventsData } = await supabase
         .from('network_events')
         .select('*')
         .order('offline_time', { ascending: false })
@@ -266,7 +256,28 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
     } finally {
       setLoading(false)
     }
-  }
+  }, [selectedClient])
+
+  useEffect(() => {
+    const initialFetch = setTimeout(fetchData, 0)
+
+    const kioskSubscription = supabase
+      .channel('kiosks-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kiosks' }, () => {
+        fetchData()
+      })
+      .subscribe()
+
+    const intervalId = setInterval(() => {
+      fetchData()
+    }, 60000) // Refrescar cada 1 minuto para evaluar heartbeats
+
+    return () => {
+      clearTimeout(initialFetch)
+      supabase.removeChannel(kioskSubscription)
+      clearInterval(intervalId)
+    }
+  }, [fetchData])
 
   if (loading) {
     return (
@@ -640,7 +651,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter -Physical | Restart-NetAdapter')}>Reiniciar Red</button>
-                <button className="quick-cmd-btn" onClick={() => sendCommand("[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile 'C:\\KioskNetMonitor\\Agente_Enlace360_Service.ps1' -UseBasicParsing; Write-Output 'Descarga completada. El agente se reiniciara automaticamente.'")}>Actualizar Agente</button>
+                <button className="quick-cmd-btn" onClick={() => sendCommand(AGENT_UPDATE_COMMAND)}>Actualizar Agente</button>
                 <button className="quick-cmd-btn danger" onClick={() => { if(window.confirm('¿Forzar reinicio del kiosco?')) sendCommand('Restart-Computer -Force') }}>Reiniciar PC</button>
               </div>
 
