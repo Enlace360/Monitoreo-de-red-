@@ -21,9 +21,11 @@ function notIncludes(unexpected, detail = unexpected) {
   assert(!source.includes(unexpected), `${label} must not include: ${detail}`);
 }
 
-includes('$AgentVersion = "v3.6"', 'agent v3.6');
+includes('$AgentVersion = "v3.7"', 'agent v3.7');
 includes('$SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"', 'current Supabase URL');
 includes('$HttpTimeoutSecs = 10', 'bounded HTTP timeout');
+includes('Global\\Enlace360AgentDaemon', 'single instance mutex');
+includes('$IntegrityFile = Join-Path $LogDir "integrity_state.json"', 'local integrity state file');
 includes('Function Invoke-EnlaceRestJson', 'hardened REST helper');
 includes('Start-Job -ScriptBlock', 'killable jobs for REST/C2 isolation');
 includes('Wait-Job -Job $job -Timeout ($HttpTimeoutSecs + 3)', 'hard REST timeout');
@@ -36,6 +38,14 @@ includes('Wait-Job -Job $job -Timeout 60', 'C2 command timeout');
 includes('output_log = $output.Trim()', 'C2 writes command output');
 includes('executed_at = (Get-Date).ToUniversalTime()', 'C2 writes execution time');
 includes('Function Update-KioskStatus', 'heartbeat function');
+includes('Function Get-AgentIntegrity', 'agent integrity inventory');
+includes('Function Report-IntegrityEvent', 'integrity event reporting');
+includes('Function Submit-KioskPayload', 'kiosk payload fallback sender');
+includes('integrity_status', 'heartbeat reports integrity status');
+includes('integrity_alert', 'heartbeat reports integrity alert');
+includes('integrity_details', 'heartbeat reports integrity details');
+includes('INTEGRIDAD AGENTE', 'integrity events use explicit cause');
+includes('Enlace360Agent', 'service presence included in integrity');
 includes('[HEARTBEAT] Preparando payload', 'heartbeat payload checkpoint');
 includes('[HEARTBEAT] Enviando estado', 'heartbeat send checkpoint');
 includes('return $true', 'heartbeat success result');

@@ -162,7 +162,7 @@ body {
 /* Stats Row */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1.5rem;
   margin-bottom: 2.5rem;
 }
@@ -284,6 +284,42 @@ body {
 .kiosk-card.degraded:hover {
   transform: translateY(-5px) scale(1.02);
   box-shadow: 0 10px 20px rgba(255, 145, 0, 0.15);
+}
+
+.kiosk-card.integrity-warning {
+  border-left: 1px solid rgba(255, 145, 0, 0.55);
+}
+
+.kiosk-card.integrity-critical {
+  border-left: 1px solid rgba(255, 23, 68, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(255, 23, 68, 0.12);
+}
+
+.integrity-pill {
+  width: 100%;
+  max-width: 118px;
+  text-align: center;
+  font-size: 0.62rem;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.integrity-pill.warning,
+.integrity-pill.unknown {
+  color: #ffd180;
+  background: rgba(255, 145, 0, 0.12);
+  border: 1px solid rgba(255, 145, 0, 0.35);
+}
+
+.integrity-pill.critical {
+  color: #ff8a80;
+  background: rgba(255, 23, 68, 0.12);
+  border: 1px solid rgba(255, 23, 68, 0.45);
 }
 
 .status-indicator {

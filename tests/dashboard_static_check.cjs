@@ -14,6 +14,13 @@ function notIncludes(unexpected, label = unexpected) {
 }
 
 includes('const AGENT_UPDATE_COMMAND =', 'shared update command constant');
+includes('getIntegrityInfo', 'dashboard computes integrity display state');
+includes('integrity_status', 'dashboard reads integrity status');
+includes('integrity_alert', 'dashboard reads integrity alert');
+includes('integrityCount', 'dashboard counts integrity alerts');
+includes('Integridad', 'dashboard has integrity stat');
+includes('integrity-pill', 'dashboard shows card-level integrity badge');
+includes('kiosk-card integrity-', 'dashboard applies integrity card class');
 includes('C:\\\\ProgramData\\\\Enlace360\\\\Agent', 'SYSTEM install path in update command');
 includes('agent_payload.cache', 'cache update in dashboard command');
 includes('[Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent))', 'dashboard refreshes cache after agent download');

@@ -5,6 +5,23 @@ import './index.css'
 
 const AGENT_UPDATE_COMMAND = "$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $dir = 'C:\\ProgramData\\Enlace360\\Agent'; $agent = Join-Path $dir 'Agente_Enlace360_Service.ps1'; $cache = Join-Path $dir 'agent_payload.cache'; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile $agent -UseBasicParsing; [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent)) | Set-Content -Path $cache -Encoding ASCII -Force; Write-Output 'Descarga completada. Cache local actualizado.'"
 
+const getIntegrityInfo = (kiosk = {}) => {
+  const status = String(kiosk.integrity_status || 'unknown').toLowerCase()
+  const alert = kiosk.integrity_alert || ''
+
+  if (status === 'critical') {
+    return { status: 'critical', label: 'Integridad crítica', title: alert || 'Faltan archivos o tareas críticas del agente.' }
+  }
+  if (status === 'warning') {
+    return { status: 'warning', label: 'Integridad alerta', title: alert || 'Hay componentes de respaldo faltantes o detenidos.' }
+  }
+  if (status === 'ok') {
+    return { status: 'ok', label: 'Integridad OK', title: alert || 'Integridad OK' }
+  }
+
+  return { status: 'unknown', label: 'Sin integridad', title: 'Este agente aún no reporta integrity_status.' }
+}
+
 function App() {
   const [allKiosks, setAllKiosks] = useState([])
   const [allEvents, setAllEvents] = useState([])
@@ -293,6 +310,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
 
   const onlineCount = filteredKiosks.filter(k => k.status === 'online').length
   const offlineCount = filteredKiosks.filter(k => k.status === 'offline').length
+  const integrityCount = filteredKiosks.filter(k => ['critical', 'warning'].includes(getIntegrityInfo(k).status)).length
   const totalCount = filteredKiosks.length
 
   // Agrupar los kioscos filtrados por Sucursal (location)
@@ -368,6 +386,15 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             <h3 style={{ color: 'var(--status-offline)' }}>{offlineCount}</h3>
           </div>
         </div>
+        <div className="glass-panel stat-card">
+          <div className="stat-icon" style={{ borderColor: 'rgba(255,145,0,0.25)', boxShadow: 'inset 0 0 10px rgba(255,145,0,0.1)' }}>
+            <ShieldAlert size={28} color="var(--status-warning)" />
+          </div>
+          <div className="stat-info">
+            <p>Integridad</p>
+            <h3 style={{ color: integrityCount > 0 ? 'var(--status-warning)' : 'var(--status-online)' }}>{integrityCount}</h3>
+          </div>
+        </div>
       </div>
 
       <div className="dashboard-layout">
@@ -393,36 +420,44 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                   <span className="location-count">({groupKiosks.length})</span>
                 </h3>
                 <div className="kiosk-grid">
-                  {groupKiosks.map((kiosk, idx) => (
-                    <div key={idx} className={`kiosk-card ${kiosk.status}`} style={{ position: 'relative' }}>
-                      <div className="status-indicator"></div>
-                      {(() => {
-                        const parts = (kiosk.uptime || '').split(' | ')
-                        const version = parts.length > 1 ? parts[1] : null
-                        return version ? (
-                          <span style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,194,255,0.15)', color: 'var(--brand-cyan)', fontSize: '0.6rem', padding: '2px 7px', borderRadius: '8px', fontWeight: '600', letterSpacing: '0.5px', border: '1px solid rgba(0,194,255,0.2)' }}>
-                            {version}
-                          </span>
-                        ) : null
-                      })()}
-                      <div className="kiosk-name">{kiosk.kiosk_id}</div>
-                      <div className="kiosk-uptime">{(kiosk.uptime || 'Iniciando...').split(' | ')[0]}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(0,0,0,0.15)', padding: '5px', borderRadius: '4px' }}>
-                        <span>IP: {kiosk.ip_address || 'Desconocida'}</span>
-                        {kiosk.mac_address && <span>MAC: {kiosk.mac_address}</span>}
+                  {groupKiosks.map((kiosk, idx) => {
+                    const integrity = getIntegrityInfo(kiosk)
+                    return (
+                      <div key={idx} className={`kiosk-card integrity-${integrity.status} ${kiosk.status}`} style={{ position: 'relative' }}>
+                        <div className="status-indicator"></div>
+                        {(() => {
+                          const parts = (kiosk.uptime || '').split(' | ')
+                          const version = parts.length > 1 ? parts[1] : null
+                          return version ? (
+                            <span style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,194,255,0.15)', color: 'var(--brand-cyan)', fontSize: '0.6rem', padding: '2px 7px', borderRadius: '8px', fontWeight: '600', letterSpacing: '0.5px', border: '1px solid rgba(0,194,255,0.2)' }}>
+                              {version}
+                            </span>
+                          ) : null
+                        })()}
+                        <div className="kiosk-name">{kiosk.kiosk_id}</div>
+                        <div className="kiosk-uptime">{(kiosk.uptime || 'Iniciando...').split(' | ')[0]}</div>
+                        {integrity.status !== 'ok' && (
+                          <div className={`integrity-pill ${integrity.status}`} title={integrity.title}>
+                            {integrity.label}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(0,0,0,0.15)', padding: '5px', borderRadius: '4px' }}>
+                          <span>IP: {kiosk.ip_address || 'Desconocida'}</span>
+                          {kiosk.mac_address && <span>MAC: {kiosk.mac_address}</span>}
+                        </div>
+                        <button
+                          className="terminal-btn"
+                          onClick={(e) => { e.stopPropagation(); setTerminalKiosk(kiosk.kiosk_id) }}
+                          style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', opacity: 0.7, padding: '5px' }}
+                          title="Abrir Terminal Remota"
+                          onMouseOver={(e) => { e.currentTarget.style.color = 'var(--brand-cyan)'; e.currentTarget.style.opacity = 1 }}
+                          onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.opacity = 0.7 }}
+                        >
+                          <Terminal size={18} />
+                        </button>
                       </div>
-                      <button 
-                        className="terminal-btn"
-                        onClick={(e) => { e.stopPropagation(); setTerminalKiosk(kiosk.kiosk_id) }}
-                        style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', opacity: 0.7, padding: '5px' }}
-                        title="Abrir Terminal Remota"
-                        onMouseOver={(e) => { e.currentTarget.style.color = 'var(--brand-cyan)'; e.currentTarget.style.opacity = 1 }}
-                        onMouseOut={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.opacity = 0.7 }}
-                      >
-                        <Terminal size={18} />
-                      </button>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             ))}

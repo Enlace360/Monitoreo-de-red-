@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.6"
+$AgentVersion = "v3.7"
 
 $CheckIntervalSecs = 30
 $HttpTimeoutSecs = 10
@@ -39,6 +39,10 @@ $ConfigFile = Join-Path $LogDir "config.json"
 $StateFile = Join-Path $LogDir "network_state.json"
 $HeartbeatFile = Join-Path $LogDir "last_heartbeat.txt"
 $LogFile = Join-Path $LogDir "agente.log"
+$IntegrityFile = Join-Path $LogDir "integrity_state.json"
+$ServiceName = "Enlace360Agent"
+$TaskAgent = "Enlace360_Agent"
+$TaskHealthCheck = "Enlace360_HealthCheck"
 
 $Headers = @{
     "apikey" = $SupabaseAnonKey
@@ -58,6 +62,17 @@ Function Write-Log {
     }
 
     $logLine | Out-File -FilePath $LogFile -Append -Encoding UTF8
+}
+
+$createdNewMutex = $false
+try {
+    $AgentMutex = New-Object System.Threading.Mutex($true, "Global\Enlace360AgentDaemon", [ref]$createdNewMutex)
+    if (-not $createdNewMutex) {
+        Write-Log "[INFO] Ya existe una instancia activa del agente. Saliendo para evitar proceso duplicado."
+        exit 0
+    }
+} catch {
+    Write-Log "[WARNING] No se pudo crear mutex de instancia unica: $($_.Exception.Message)"
 }
 
 Function Invoke-EnlaceRestJson {
@@ -244,6 +259,205 @@ Function Get-SystemUptime {
     } catch { return "Desconocido" }
 }
 
+Function New-IntegrityCheck {
+    param(
+        [string]$Name,
+        [string]$Kind,
+        [bool]$Ok,
+        [string]$Severity,
+        [string]$Details
+    )
+
+    [pscustomobject]@{
+        name = $Name
+        kind = $Kind
+        ok = $Ok
+        severity = $Severity
+        details = $Details
+    }
+}
+
+Function Get-FileIntegrityCheck {
+    param(
+        [string]$Name,
+        [string]$Path,
+        [string]$Severity = "critical"
+    )
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        try {
+            $hash = (Get-FileHash -LiteralPath $Path -Algorithm MD5 -ErrorAction Stop).Hash
+            return New-IntegrityCheck -Name $Name -Kind "file" -Ok $true -Severity "ok" -Details "present hash=$hash"
+        } catch {
+            return New-IntegrityCheck -Name $Name -Kind "file" -Ok $true -Severity "warning" -Details "present hash_error=$($_.Exception.Message)"
+        }
+    }
+
+    return New-IntegrityCheck -Name $Name -Kind "file" -Ok $false -Severity $Severity -Details "missing path=$Path"
+}
+
+Function Get-TaskIntegrityCheck {
+    param(
+        [string]$Name,
+        [string]$Severity = "warning"
+    )
+
+    $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if ($task) {
+        $info = Get-ScheduledTaskInfo -TaskName $Name -ErrorAction SilentlyContinue
+        return New-IntegrityCheck -Name $Name -Kind "task" -Ok $true -Severity "ok" -Details "state=$($task.State); principal=$($task.Principal.UserId); last=$($info.LastTaskResult)"
+    }
+
+    return New-IntegrityCheck -Name $Name -Kind "task" -Ok $false -Severity $Severity -Details "missing scheduled_task=$Name"
+}
+
+Function Get-ServiceIntegrityCheck {
+    param([string]$Name)
+
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($svc) {
+        $severity = if ($svc.Status -eq "Running") { "ok" } else { "warning" }
+        $svcInfo = Get-CimInstance Win32_Service -Filter ("Name='{0}'" -f $Name) -ErrorAction SilentlyContinue
+        return New-IntegrityCheck -Name $Name -Kind "service" -Ok ($svc.Status -eq "Running") -Severity $severity -Details "status=$($svc.Status); start_type=$($svcInfo.StartMode)"
+    }
+
+    return New-IntegrityCheck -Name $Name -Kind "service" -Ok $false -Severity "warning" -Details "missing windows_service=$Name"
+}
+
+Function Get-AgentIntegrity {
+    $previousIntegrity = $null
+    if (Test-Path -LiteralPath $IntegrityFile -PathType Leaf) {
+        try { $previousIntegrity = Get-Content -LiteralPath $IntegrityFile -Raw | ConvertFrom-Json } catch { $previousIntegrity = $null }
+    }
+
+    $checks = @()
+    $checks += Get-FileIntegrityCheck -Name "Agente_Enlace360_Service.ps1" -Path (Join-Path $LogDir "Agente_Enlace360_Service.ps1") -Severity "critical"
+    $checks += Get-FileIntegrityCheck -Name "Enlace360_HealthCheck.ps1" -Path (Join-Path $LogDir "Enlace360_HealthCheck.ps1") -Severity "critical"
+    $checks += Get-FileIntegrityCheck -Name "agent_payload.cache" -Path (Join-Path $LogDir "agent_payload.cache") -Severity "warning"
+    $checks += Get-FileIntegrityCheck -Name "healthcheck_payload.cache" -Path (Join-Path $LogDir "healthcheck_payload.cache") -Severity "warning"
+    $checks += Get-FileIntegrityCheck -Name "config.json" -Path $ConfigFile -Severity "critical"
+    $checks += Get-FileIntegrityCheck -Name "install_manifest.json" -Path (Join-Path $LogDir "install_manifest.json") -Severity "warning"
+    $checks += Get-TaskIntegrityCheck -Name $TaskAgent -Severity "warning"
+    $checks += Get-TaskIntegrityCheck -Name $TaskHealthCheck -Severity "critical"
+    $checks += Get-ServiceIntegrityCheck -Name $ServiceName
+
+    $failed = @($checks | Where-Object { -not $_.ok })
+    $critical = @($failed | Where-Object { $_.severity -eq "critical" })
+    $warning = @($failed | Where-Object { $_.severity -ne "critical" })
+
+    $status = "ok"
+    if ($critical.Count -gt 0) {
+        $status = "critical"
+    } elseif ($warning.Count -gt 0) {
+        $status = "warning"
+    }
+
+    $alert = if ($failed.Count -gt 0) {
+        (($failed | ForEach-Object { "$($_.name): $($_.details)" }) -join " | ")
+    } else {
+        "Integridad OK"
+    }
+
+    $integrity = [pscustomobject]@{
+        status = $status
+        alert = $alert
+        checked_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        service_name = $ServiceName
+        expected_tasks = @($TaskAgent, $TaskHealthCheck)
+        expected_files = @("Agente_Enlace360_Service.ps1", "Enlace360_HealthCheck.ps1", "agent_payload.cache", "healthcheck_payload.cache", "config.json", "install_manifest.json")
+        failed_count = $failed.Count
+        critical_count = $critical.Count
+        warning_count = $warning.Count
+        checks = $checks
+    }
+
+    if ($previousIntegrity -and $previousIntegrity.last_reported_fingerprint) {
+        $integrity | Add-Member -NotePropertyName "last_reported_fingerprint" -NotePropertyValue $previousIntegrity.last_reported_fingerprint -Force
+        $integrity | Add-Member -NotePropertyName "last_reported_at" -NotePropertyValue $previousIntegrity.last_reported_at -Force
+    }
+
+    try {
+        $integrity | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $IntegrityFile -Encoding UTF8 -Force
+    } catch {
+        Write-Log "[WARNING] No se pudo escribir integrity_state.json: $($_.Exception.Message)"
+    }
+
+    return $integrity
+}
+
+Function Get-IntegrityFingerprint {
+    param($Integrity)
+    if (-not $Integrity -or $Integrity.status -eq "ok") { return "ok" }
+    return (@($Integrity.checks) | Where-Object { -not $_.ok } | ForEach-Object { "$($_.kind):$($_.name):$($_.severity)" }) -join "|"
+}
+
+Function Report-IntegrityEvent {
+    param($Integrity)
+    if (-not $Integrity -or $Integrity.status -eq "ok") { return }
+
+    $fingerprint = Get-IntegrityFingerprint -Integrity $Integrity
+    $last = $null
+    if (Test-Path -LiteralPath $IntegrityFile -PathType Leaf) {
+        try { $last = Get-Content -LiteralPath $IntegrityFile -Raw | ConvertFrom-Json } catch { $last = $null }
+    }
+
+    if ($last -and $last.last_reported_fingerprint -eq $fingerprint -and $last.last_reported_at) {
+        try {
+            $lastReport = ([datetime]$last.last_reported_at).ToUniversalTime()
+            if (((Get-Date).ToUniversalTime() - $lastReport).TotalHours -lt 6) { return }
+        } catch {}
+    }
+
+    $nowUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $cause = "INTEGRIDAD AGENTE $($Integrity.status.ToUpper()): $($Integrity.alert)"
+    if ($cause.Length -gt 500) { $cause = $cause.Substring(0, 500) + "...[Truncado]" }
+
+    $bodyStr = @{
+        kiosk_id = $KioskName
+        client_name = $ClientName
+        location = $Location
+        offline_time = $nowUtc
+        online_time = $nowUtc
+        probable_cause = $cause
+        diagnostics = $Integrity
+    } | ConvertTo-Json -Depth 8
+
+    try {
+        Send-RestRequest -Uri "$SupabaseUrl/rest/v1/network_events" -Method "POST" -Headers $Headers -JsonBody $bodyStr | Out-Null
+        Write-Log "[INTEGRITY] Evento de integridad reportado a Supabase: $fingerprint"
+        $Integrity | Add-Member -NotePropertyName "last_reported_fingerprint" -NotePropertyValue $fingerprint -Force
+        $Integrity | Add-Member -NotePropertyName "last_reported_at" -NotePropertyValue $nowUtc -Force
+        $Integrity | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $IntegrityFile -Encoding UTF8 -Force
+    } catch {
+        Write-Log "[WARNING] No se pudo reportar evento de integridad: $_"
+    }
+}
+
+Function Submit-KioskPayload {
+    param([System.Collections.IDictionary]$Payload)
+
+    $headersUpsert = $Headers.Clone()
+    $headersUpsert.Add("Prefer", "resolution=merge-duplicates")
+    $url = "$SupabaseUrl/rest/v1/kiosks"
+
+    try {
+        Send-RestRequest -Uri $url -Method "POST" -Headers $headersUpsert -JsonBody ($Payload | ConvertTo-Json -Depth 8) | Out-Null
+        return $true
+    } catch {
+        $errorText = [string]$_
+        if ($Payload.Contains("integrity_status") -and ($errorText -match "integrity_|schema cache|PGRST|column")) {
+            Write-Log "[WARNING] Supabase aun no acepta columnas de integridad. Reintentando heartbeat base: $errorText"
+            $fallback = $Payload.Clone()
+            foreach ($key in @("integrity_status", "integrity_alert", "integrity_checked_at", "integrity_details")) {
+                if ($fallback.Contains($key)) { $fallback.Remove($key) }
+            }
+            Send-RestRequest -Uri $url -Method "POST" -Headers $headersUpsert -JsonBody ($fallback | ConvertTo-Json -Depth 5) | Out-Null
+            return $true
+        }
+        throw
+    }
+}
+
 # Auto-UpdateFromGitHub eliminada en v3.4.
 # La actualizacion ahora se gestiona via C2 (boton 'Actualizar Agente' en el Dashboard)
 # + deteccion automatica de cambios en disco via Check-SelfUpdate (hash MD5).
@@ -256,17 +470,14 @@ Function Update-KioskStatus {
     param([string]$Status, [int]$Latency = 0)
     try {
         Write-Log "[HEARTBEAT] Preparando payload ($Status)..."
-        $url = "$SupabaseUrl/rest/v1/kiosks"
-
-        $headersUpsert = $Headers.Clone()
-        $headersUpsert.Add("Prefer", "resolution=merge-duplicates")
 
         $upStr = Get-SystemUptime
         $upFinal = $upStr + " | " + $AgentVersion
         $localIp = Get-LocalIP
         $localMac = Get-LocalMAC
+        $integrity = Get-AgentIntegrity
 
-        $bodyStr = @{
+        $payload = [ordered]@{
             kiosk_id = $KioskName
             client_name = $ClientName
             location = $Location
@@ -276,11 +487,17 @@ Function Update-KioskStatus {
             ip_address = $localIp
             mac_address = $localMac
             latency_ms = $Latency
-        } | ConvertTo-Json
+            updated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            integrity_status = $integrity.status
+            integrity_alert = $integrity.alert
+            integrity_checked_at = $integrity.checked_at
+            integrity_details = $integrity
+        }
 
         Write-Log "[HEARTBEAT] Enviando estado ($Status) a Supabase..."
-        Send-RestRequest -Uri $url -Method "POST" -Headers $headersUpsert -JsonBody $bodyStr | Out-Null
+        Submit-KioskPayload -Payload $payload | Out-Null
         Write-Log "Estado ($Status) actualizado en Supabase."
+        Report-IntegrityEvent -Integrity $integrity
         return $true
     } catch {
         Write-Log "[WARNING] No se pudo actualizar estado en Supabase: $_"
