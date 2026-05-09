@@ -31,9 +31,24 @@ const formatHeartbeatAge = (minutes) => {
   return remainingHours > 0 ? `Hace ${days} d ${remainingHours} h` : `Hace ${days} d`
 }
 
+const getAgentVersion = (kiosk = {}) => {
+  const parts = String(kiosk.uptime || '').split(' | ')
+  return parts.length > 1 ? parts[1].trim() : ''
+}
+
+const isIntegrityCapableVersion = (version) => {
+  const match = String(version || '').match(/^v?(\d+)\.(\d+)/i)
+  if (!match) return false
+
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return major > 3 || (major === 3 && minor >= 8)
+}
+
 const getIntegrityInfo = (kiosk = {}) => {
   const status = String(kiosk.integrity_status || 'unknown').toLowerCase()
   const alert = kiosk.integrity_alert || ''
+  const version = getAgentVersion(kiosk)
 
   if (status === 'critical') {
     return { status: 'critical', label: 'Integridad crítica', title: alert || 'Faltan archivos o tareas críticas del agente.' }
@@ -45,7 +60,16 @@ const getIntegrityInfo = (kiosk = {}) => {
     return { status: 'ok', label: 'Integridad OK', title: alert || 'Integridad OK' }
   }
 
-  return { status: 'unknown', label: 'Sin integridad', title: 'Este agente aún no reporta integrity_status.' }
+  if (!isIntegrityCapableVersion(version)) {
+    const versionLabel = version || 'legacy'
+    return {
+      status: 'legacy',
+      label: 'Pendiente v3.8',
+      title: `Agente ${versionLabel}: no reporta integridad hasta migrarlo a v3.8.`
+    }
+  }
+
+  return { status: 'unknown', label: 'Integridad pendiente', title: 'Este agente v3.8 aún no reporta integrity_status.' }
 }
 
 function App() {
@@ -482,8 +506,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                       <div key={idx} className={`kiosk-card integrity-${integrity.status} ${kiosk.status}`} style={{ position: 'relative' }}>
                         <div className="status-indicator"></div>
                         {(() => {
-                          const parts = (kiosk.uptime || '').split(' | ')
-                          const version = parts.length > 1 ? parts[1] : null
+                          const version = getAgentVersion(kiosk)
                           return version ? (
                             <span style={{ position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,194,255,0.15)', color: 'var(--brand-cyan)', fontSize: '0.6rem', padding: '2px 7px', borderRadius: '8px', fontWeight: '600', letterSpacing: '0.5px', border: '1px solid rgba(0,194,255,0.2)' }}>
                               {version}

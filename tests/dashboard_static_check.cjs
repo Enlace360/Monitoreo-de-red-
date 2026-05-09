@@ -4,6 +4,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'dashboard', 'src', 'App.jsx'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'dashboard', 'src', 'index.css'), 'utf8');
 const supabaseClient = fs.readFileSync(path.join(root, 'dashboard', 'src', 'supabaseClient.js'), 'utf8');
 
 function includes(expected, label = expected) {
@@ -22,12 +23,17 @@ includes('heartbeat_stale', 'dashboard tracks stale heartbeats');
 includes('data-banner warning', 'dashboard warns when most heartbeats are stale');
 includes('kiosk-heartbeat', 'dashboard displays heartbeat age per kiosk');
 includes('getIntegrityInfo', 'dashboard computes integrity display state');
+includes('getAgentVersion', 'dashboard parses agent version from uptime');
+includes('isIntegrityCapableVersion', 'dashboard distinguishes legacy agents from v3.8 integrity-capable agents');
+includes('Pendiente v3.8', 'dashboard labels legacy agents as pending v3.8 instead of failed integrity');
+includes('Integridad pendiente', 'dashboard labels v3.8 unknown integrity separately');
 includes('integrity_status', 'dashboard reads integrity status');
 includes('integrity_alert', 'dashboard reads integrity alert');
 includes('integrityCount', 'dashboard counts integrity alerts');
 includes('Integridad', 'dashboard has integrity stat');
 includes('integrity-pill', 'dashboard shows card-level integrity badge');
 includes('kiosk-card integrity-', 'dashboard applies integrity card class');
+assert(css.includes('.integrity-pill.legacy'), 'dashboard styles legacy integrity status neutrally');
 includes('C:\\\\ProgramData\\\\Enlace360\\\\Agent', 'SYSTEM install path in update command');
 includes('agent_payload.cache', 'cache update in dashboard command');
 includes('[Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent))', 'dashboard refreshes cache after agent download');
