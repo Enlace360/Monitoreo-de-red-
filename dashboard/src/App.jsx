@@ -365,6 +365,7 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
   const offlineCount = filteredKiosks.filter(k => k.status === 'offline').length
   const integrityCount = filteredKiosks.filter(k => ['critical', 'warning'].includes(getIntegrityInfo(k).status)).length
   const totalCount = filteredKiosks.length
+  const terminalKioskInfo = terminalKiosk ? allKiosks.find(k => k.kiosk_id === terminalKiosk) : null
   const staleHeartbeatCount = filteredKiosks.filter(k => k.heartbeat_stale).length
   const staleHeartbeatRatio = totalCount > 0 ? staleHeartbeatCount / totalCount : 0
   const showHeartbeatBanner = totalCount > 0 && staleHeartbeatRatio >= STALE_HEARTBEAT_BANNER_RATIO
@@ -526,10 +527,6 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                             {integrity.label}
                           </div>
                         )}
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(0,0,0,0.15)', padding: '5px', borderRadius: '4px' }}>
-                          <span>IP: {kiosk.ip_address || 'Desconocida'}</span>
-                          {kiosk.mac_address && <span>MAC: {kiosk.mac_address}</span>}
-                        </div>
                         <button
                           className="terminal-btn"
                           onClick={(e) => { e.stopPropagation(); setTerminalKiosk(kiosk.kiosk_id) }}
@@ -768,6 +765,17 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             </div>
             
             <div className="modal-body" style={{ padding: '20px 0 0 0' }}>
+              <div className="terminal-device-meta">
+                <div>
+                  <span>IP</span>
+                  <strong>{terminalKioskInfo?.ip_address || 'Desconocida'}</strong>
+                </div>
+                <div>
+                  <span>MAC</span>
+                  <strong>{terminalKioskInfo?.mac_address || 'Desconocida'}</strong>
+                </div>
+              </div>
+
               {!c2AdminSecret.trim() && (
                 <div style={{ marginBottom: '15px', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,145,0,0.35)', background: 'rgba(255,145,0,0.08)', color: 'var(--status-warning)', fontSize: '0.9rem' }}>
                   Configura el token C2 Admin en ajustes para ver historial y enviar comandos.

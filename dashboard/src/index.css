@@ -692,6 +692,35 @@ body {
 .terminal-modal {
   font-family: 'Courier New', Courier, monospace;
 }
+
+.terminal-device-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.terminal-device-meta div {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(0, 163, 218, 0.2);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.terminal-device-meta span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  margin-bottom: 4px;
+}
+
+.terminal-device-meta strong {
+  display: block;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
 .quick-cmd-btn {
   background: rgba(0, 163, 218, 0.1);
   border: 1px solid var(--brand-cyan);
