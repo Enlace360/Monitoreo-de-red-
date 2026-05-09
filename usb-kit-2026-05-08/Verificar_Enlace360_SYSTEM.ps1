@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VerifierVersion = "SYSTEM-2026-05-08.1"
+$VerifierVersion = "SYSTEM-2026-05-09.1"
 $PreferredLogFile = "C:\Enlace360_SYSTEM_verifier.log"
 $LogFile = $PreferredLogFile
 $TaskAgent = "Enlace360_Agent"
@@ -101,6 +101,13 @@ function Read-AgentSupabase {
     return @{ Url = $url; Key = $key; Headers = @{ apikey = $key; Authorization = "Bearer $key" } }
 }
 
+function Get-C2AdminSecret {
+    if ([string]::IsNullOrWhiteSpace($env:ENLACE360_C2_ADMIN_SECRET)) {
+        return ""
+    }
+    return [string]$env:ENLACE360_C2_ADMIN_SECRET
+}
+
 function Restore-AgentFromCache {
     param([string]$AgentPath, [string]$AgentCachePath)
     if (Test-Path -LiteralPath $AgentPath -PathType Leaf) { return "agente presente" }
@@ -151,22 +158,33 @@ function Get-KioskRow {
 
 function Test-C2Roundtrip {
     param($Supabase, [string]$KioskName)
+    $adminSecret = Get-C2AdminSecret
+    if ([string]::IsNullOrWhiteSpace($adminSecret)) {
+        return "C2 roundtrip omitido: define ENLACE360_C2_ADMIN_SECRET para probar RPC seguro"
+    }
+
     $nonce = "ENLACE360_SYSTEM_{0}" -f ([guid]::NewGuid().ToString("N").Substring(0, 12))
-    $created = Invoke-SupabaseJson -Uri "$($Supabase.Url)/rest/v1/remote_commands" -Method "POST" -Headers $Supabase.Headers -Body @{
-        kiosk_id = $KioskName
-        command_string = "Write-Output '$nonce'"
-        status = "pending"
-    } -ExtraHeaders @{ Prefer = "return=representation" }
-    $id = (@($created) | Select-Object -First 1).id
+    $created = Invoke-SupabaseJson -Uri "$($Supabase.Url)/rest/v1/rpc/enlace360_enqueue_remote_command" -Method "POST" -Headers $Supabase.Headers -Body @{
+        p_admin_secret = $adminSecret
+        p_kiosk_id = $KioskName
+        p_command_string = "Write-Output '$nonce'"
+        p_requested_by = "verificador"
+    }
+    $id = [string]$created
     if (-not $id) { throw "Supabase no retorno id de remote_commands" }
 
     Start-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 
     Wait-Until -Label "C2 roundtrip $id" -TimeoutSeconds 150 -IntervalSeconds 5 -Condition {
-        $encodedId = [uri]::EscapeDataString([string]$id)
-        $cmd = @(Invoke-SupabaseJson -Uri "$($Supabase.Url)/rest/v1/remote_commands?id=eq.$encodedId&select=id,status,output_log,executed_at" -Method "GET" -Headers $Supabase.Headers) | Select-Object -First 1
+        $commands = Invoke-SupabaseJson -Uri "$($Supabase.Url)/rest/v1/rpc/enlace360_list_remote_commands" -Method "POST" -Headers $Supabase.Headers -Body @{
+            p_admin_secret = $adminSecret
+            p_kiosk_id = $KioskName
+            p_limit = 50
+        }
+        $cmd = @($commands) | Where-Object { [string]$_.id -eq [string]$id } | Select-Object -First 1
         if (-not $cmd -or $cmd.status -eq "pending") { return $false }
+        if ($cmd.status -eq "in_progress") { return $false }
         if ($cmd.status -ne "executed") { throw "C2 termino $($cmd.status): $($cmd.output_log)" }
         if ($cmd.output_log -notlike "*$nonce*") { throw "C2 sin nonce. Output=$($cmd.output_log)" }
         return $true
@@ -362,10 +380,18 @@ if ($TestHealthCheck) {
 }
 
 Invoke-Check "Pending remote_commands vacio" {
-    $encodedKiosk = [uri]::EscapeDataString([string]$script:Config.KioskName)
-    $pending = Invoke-SupabaseJson -Uri "$($script:Supabase.Url)/rest/v1/remote_commands?kiosk_id=eq.$encodedKiosk&status=eq.pending&select=id" -Method "GET" -Headers $script:Supabase.Headers
+    $adminSecret = Get-C2AdminSecret
+    if ([string]::IsNullOrWhiteSpace($adminSecret)) {
+        return "Pending remote_commands omitido: define ENLACE360_C2_ADMIN_SECRET para consultar RPC seguro"
+    }
+    $pending = Invoke-SupabaseJson -Uri "$($script:Supabase.Url)/rest/v1/rpc/enlace360_list_remote_commands" -Method "POST" -Headers $script:Supabase.Headers -Body @{
+        p_admin_secret = $adminSecret
+        p_kiosk_id = [string]$script:Config.KioskName
+        p_limit = 100
+    }
     $items = @($pending)
-    if ($items.Count -gt 0) { throw "Pending remote_commands=$($items.id -join ',')" }
+    $stillPending = @($items | Where-Object { $_.status -eq "pending" })
+    if ($stillPending.Count -gt 0) { throw "Pending remote_commands=$($stillPending.id -join ',')" }
     "Pending remote_commands=[]"
 } | Out-Null
 

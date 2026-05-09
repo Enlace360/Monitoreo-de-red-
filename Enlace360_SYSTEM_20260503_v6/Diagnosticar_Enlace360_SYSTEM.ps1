@@ -133,9 +133,20 @@ function Read-SupabaseCredentials {
 function Invoke-SupabaseJson {
     param(
         [string]$Uri,
-        [hashtable]$Headers
+        [hashtable]$Headers,
+        [string]$Method = "GET",
+        [object]$Body = $null
     )
-    Invoke-RestMethod -Uri $Uri -Method "GET" -Headers $Headers -TimeoutSec 20 -ErrorAction Stop
+    if ($null -ne $Body) {
+        $json = $Body | ConvertTo-Json -Depth 6
+        return Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers -Body $json -ContentType "application/json; charset=utf-8" -TimeoutSec 20 -ErrorAction Stop
+    }
+    Invoke-RestMethod -Uri $Uri -Method $Method -Headers $Headers -TimeoutSec 20 -ErrorAction Stop
+}
+
+function Get-C2AdminSecret {
+    if ([string]::IsNullOrWhiteSpace($env:ENLACE360_C2_ADMIN_SECRET)) { return "" }
+    return [string]$env:ENLACE360_C2_ADMIN_SECRET
 }
 
 function Get-AgentProcess {
@@ -558,11 +569,20 @@ Invoke-CaptureBlock "SUPABASE REMOTE COMMANDS PENDING" {
     $agentPath = Join-Path $InstallDir "Agente_Enlace360_Service.ps1"
     $configPath = Join-Path $InstallDir "config.json"
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "No existe $configPath" }
+    $adminSecret = Get-C2AdminSecret
+    if ([string]::IsNullOrWhiteSpace($adminSecret)) {
+        Add-Line "Omitido: define ENLACE360_C2_ADMIN_SECRET para consultar C2 seguro."
+        return
+    }
     $supabase = Read-SupabaseCredentials -AgentPath $agentPath
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    $encoded = [uri]::EscapeDataString([string]$config.KioskName)
     Add-Line ("Credenciales leidas desde: {0}" -f $supabase.Source)
-    $pending = Invoke-SupabaseJson -Uri "$($supabase.Url)/rest/v1/remote_commands?kiosk_id=eq.$encoded&status=eq.pending&select=id,created_at,command_string,status" -Headers $supabase.Headers
+    $commands = Invoke-SupabaseJson -Uri "$($supabase.Url)/rest/v1/rpc/enlace360_list_remote_commands" -Method "POST" -Headers $supabase.Headers -Body @{
+        p_admin_secret = $adminSecret
+        p_kiosk_id = [string]$config.KioskName
+        p_limit = 100
+    }
+    $pending = @($commands | Where-Object { $_.status -eq "pending" })
     $pending | ConvertTo-Json -Depth 6
 }
 
@@ -570,11 +590,19 @@ Invoke-CaptureBlock "SUPABASE REMOTE COMMANDS RECIENTES" {
     $agentPath = Join-Path $InstallDir "Agente_Enlace360_Service.ps1"
     $configPath = Join-Path $InstallDir "config.json"
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "No existe $configPath" }
+    $adminSecret = Get-C2AdminSecret
+    if ([string]::IsNullOrWhiteSpace($adminSecret)) {
+        Add-Line "Omitido: define ENLACE360_C2_ADMIN_SECRET para consultar C2 seguro."
+        return
+    }
     $supabase = Read-SupabaseCredentials -AgentPath $agentPath
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    $encoded = [uri]::EscapeDataString([string]$config.KioskName)
     Add-Line ("Credenciales leidas desde: {0}" -f $supabase.Source)
-    $recent = Invoke-SupabaseJson -Uri "$($supabase.Url)/rest/v1/remote_commands?kiosk_id=eq.$encoded&select=id,created_at,command_string,status,executed_at,output_log&order=created_at.desc&limit=50" -Headers $supabase.Headers
+    $recent = Invoke-SupabaseJson -Uri "$($supabase.Url)/rest/v1/rpc/enlace360_list_remote_commands" -Method "POST" -Headers $supabase.Headers -Body @{
+        p_admin_secret = $adminSecret
+        p_kiosk_id = [string]$config.KioskName
+        p_limit = 50
+    }
     $recent | ConvertTo-Json -Depth 6
 }
 

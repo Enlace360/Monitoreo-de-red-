@@ -47,7 +47,7 @@ const autoTestCodexBat = read('AutoTest_Enlace360_SYSTEM_Codex.bat');
 const autoTest = read('AutoTest_Enlace360_SYSTEM.ps1');
 const readme = read('README_SYSTEM_FINAL.txt');
 
-assertIncludes(readme, 'Version kit: SYSTEM-2026-05-08.1', 'readme version');
+assertIncludes(readme, 'Version kit: SYSTEM-2026-05-09.1', 'readme version');
 assertIncludes(readme, 'C:\\ProgramData\\Enlace360\\Agent', 'readme install path');
 assertIncludes(readme, 'Enlace360_Agent', 'readme agent task');
 assertIncludes(readme, 'Enlace360_HealthCheck', 'readme health task');
@@ -72,7 +72,10 @@ assertIncludes(installerBat, 'set "INSTALL_DIR=C:\\ProgramData\\Enlace360\\Agent
 assertIncludes(installerBat, 'set /p "CLIENT_NAME=', 'installer wrapper prompts client');
 assertIncludes(installerBat, '-ClientName "%CLIENT_NAME%" -Location "%LOCATION%" -KioskName "%KIOSK_NAME%"', 'installer wrapper passes config');
 
-assertIncludes(installer, '$InstallerVersion = "SYSTEM-2026-05-08.1"', 'installer version');
+assertIncludes(installer, '$InstallerVersion = "SYSTEM-2026-05-09.1"', 'installer version');
+assertIncludes(installer, '[string]$AgentSecret = ""', 'installer accepts optional agent secret');
+assertIncludes(installer, 'function New-AgentSecret', 'installer generates agent secret');
+assertIncludes(installer, 'AgentSecret = $AgentSecret', 'installer writes agent secret to config');
 assertIncludes(installer, '("Servicio {0}: Status={1}; StartType={2}" -f $ServiceName, $svc.Status, $svc.StartType)', 'installer safe service state log interpolation');
 assertIncludes(installer, '("Servicio {0}: NO EXISTE" -f $ServiceName)', 'installer safe missing service log interpolation');
 assertIncludes(installer, '("Tarea {0}: State={1}; User={2}; Last={3}" -f $taskName, $task.State, $task.Principal.UserId, $info.LastTaskResult)', 'installer safe task state log interpolation');
@@ -127,9 +130,12 @@ assertNotIncludes(installer, 'Enlace360_C2_Poller.ps1', 'installer external c2 p
 
 assertIncludes(verifierBat, 'Verb RunAs', 'verifier wrapper admin elevation');
 assertIncludes(verifierBat, '-ObserveSeconds %OBSERVE_SECONDS% -TestHealthCheck', 'verifier wrapper tests healthcheck');
-assertIncludes(verifier, '$VerifierVersion = "SYSTEM-2026-05-08.1"', 'verifier version');
+assertIncludes(verifier, '$VerifierVersion = "SYSTEM-2026-05-09.1"', 'verifier version');
 assertIncludes(verifier, 'Enlace360Agent', 'verifier checks service');
 assertIncludes(verifier, 'integrity_status', 'verifier reads integrity fields');
+assertIncludes(verifier, 'ENLACE360_C2_ADMIN_SECRET', 'verifier reads C2 admin secret from env');
+assertIncludes(verifier, '/rest/v1/rpc/enlace360_enqueue_remote_command', 'verifier enqueues C2 through RPC');
+assertIncludes(verifier, '/rest/v1/rpc/enlace360_list_remote_commands', 'verifier reads C2 through RPC');
 assertIncludes(verifier, 'Restore-AgentFromCache', 'verifier restores missing agent');
 assertIncludes(verifier, 'Wait-FreshHeartbeat', 'verifier waits fresh heartbeat');
 assertIncludes(verifier, 'Wait-HeartbeatAdvance', 'verifier checks dashboard counter');
@@ -137,6 +143,8 @@ assertIncludes(verifier, 'Test-C2Roundtrip', 'verifier tests real c2');
 assertIncludes(verifier, 'HealthCheck recupera proceso muerto', 'verifier tests healthcheck recovery');
 assertIncludes(verifier, 'Pending remote_commands vacio', 'verifier checks pending queue');
 assertIncludes(verifier, 'PASS VERIFICACION SYSTEM ENLACE360', 'verifier pass marker');
+assertNotIncludes(verifier, '/rest/v1/remote_commands"', 'verifier direct remote_commands table POST');
+assertNotIncludes(verifier, 'remote_commands?id=eq.', 'verifier direct remote_commands table read');
 assertNotIncludes(verifier, 'Register-ScheduledTask', 'verifier must not install tasks');
 assertNotIncludes(verifier, 'Copy-Item', 'verifier must not copy kit files');
 assertNotIncludes(verifier, '-EncodedCommand', 'verifier encoded commands');
@@ -150,6 +158,9 @@ assertIncludes(diag, 'agent_payload.cache', 'diagnostic reads credentials from c
 assertIncludes(diag, 'SUPABASE KIOSK ROW', 'diagnostic captures kiosk row');
 assertIncludes(diag, 'SUPABASE REMOTE COMMANDS PENDING', 'diagnostic captures pending commands');
 assertIncludes(diag, 'SUPABASE REMOTE COMMANDS RECIENTES', 'diagnostic captures recent commands');
+assertIncludes(diag, 'ENLACE360_C2_ADMIN_SECRET', 'diagnostic reads C2 admin secret from env');
+assertIncludes(diag, '/rest/v1/rpc/enlace360_list_remote_commands', 'diagnostic reads C2 through RPC');
+assertNotIncludes(diag, '/rest/v1/remote_commands?kiosk_id=eq.', 'diagnostic direct remote_commands table read');
 assertIncludes(diag, 'FORENSE TASKSCHEDULER OPERATIONAL ENLACE360', 'diagnostic captures task scheduler history');
 assertIncludes(diag, 'FORENSE SECURITY SCHEDULED TASKS', 'diagnostic captures security task events');
 assertIncludes(diag, 'FORENSE SECURITY PROCESS CREATION', 'diagnostic captures process creation audit');
@@ -183,7 +194,7 @@ assertIncludes(autoTestCodexBat, 'AUTO_REBOOT', 'autotest codex wrapper supports
 assertIncludes(autoTestCodexBat, 'SKIP_INSTALL', 'autotest codex wrapper supports skip install flag');
 assertIncludes(autoTestCodexBat, 'POST_REBOOT', 'autotest codex wrapper supports post reboot flag');
 assertIncludes(autoTestCodexBat, '-ClientName "%CLIENT_NAME%" -Location "%LOCATION%" -KioskName "%KIOSK_NAME%"', 'autotest codex wrapper passes config');
-assertIncludes(autoTest, '$AutoTestVersion = "SYSTEM-2026-05-08.1"', 'autotest version');
+assertIncludes(autoTest, '$AutoTestVersion = "SYSTEM-2026-05-09.1"', 'autotest version');
 assertIncludes(autoTest, 'Assert-PowerShellSyntax', 'autotest parses scripts before execution');
 assertIncludes(autoTest, '[System.Management.Automation.Language.Parser]::ParseFile', 'autotest uses parser API');
 assertIncludes(autoTest, 'Invoke-Installer', 'autotest invokes installer directly');

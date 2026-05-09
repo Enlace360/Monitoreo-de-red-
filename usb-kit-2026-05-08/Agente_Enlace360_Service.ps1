@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.7"
+$AgentVersion = "v3.8"
 
 $CheckIntervalSecs = 30
 $HttpTimeoutSecs = 10
@@ -167,6 +167,30 @@ Function Send-RestRequest {
     Invoke-EnlaceRestJson -Uri $Uri -Method $Method -Headers $Headers -JsonBody $JsonBody
 }
 
+Function New-AgentSecret {
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+        return [Convert]::ToBase64String($bytes)
+    } finally {
+        $rng.Dispose()
+    }
+}
+
+Function Get-Sha256Hex {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return "" }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        $hash = $sha.ComputeHash($bytes)
+        return ([BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 Function Invoke-WithTimeout {
     param(
         [scriptblock]$ScriptBlock,
@@ -198,17 +222,37 @@ if (Test-Path $ConfigFile) {
         $ClientName = $config.ClientName
         $Location = $config.Location
         $KioskName = $config.KioskName
+        $AgentSecret = [string]$config.AgentSecret
     } catch {
         Write-Log "[ERROR] Archivo config.json corrupto. Usando valores por defecto."
         $ClientName = "Desconocido"
         $Location = "Sin Ubicacion"
         $KioskName = "KIOSCO-" + $env:COMPUTERNAME
+        $AgentSecret = ""
     }
 } else {
     $ClientName = "Desconocido"
     $Location = "Sin Ubicacion"
     $KioskName = "KIOSCO-" + $env:COMPUTERNAME
+    $AgentSecret = ""
 }
+
+if ([string]::IsNullOrWhiteSpace($AgentSecret)) {
+    $AgentSecret = New-AgentSecret
+    try {
+        [ordered]@{
+            ClientName = $ClientName
+            Location = $Location
+            KioskName = $KioskName
+            AgentSecret = $AgentSecret
+        } | ConvertTo-Json | Set-Content -LiteralPath $ConfigFile -Encoding UTF8 -Force
+        Write-Log "[SECURITY] AgentSecret local creado en config.json."
+    } catch {
+        Write-Log "[ERROR] No se pudo persistir AgentSecret en config.json: $($_.Exception.Message)"
+    }
+}
+
+$Headers["X-Enlace360-Agent-Secret"] = $AgentSecret
 
 # ============================================================================
 # FUNCIONES DE RED
@@ -422,9 +466,30 @@ Function Report-IntegrityEvent {
         diagnostics = $Integrity
     } | ConvertTo-Json -Depth 8
 
+    $rpcBody = @{
+        p_kiosk_id = $KioskName
+        p_client_name = $ClientName
+        p_location = $Location
+        p_offline_time = $nowUtc
+        p_online_time = $nowUtc
+        p_probable_cause = $cause
+        p_diagnostics = $Integrity
+    } | ConvertTo-Json -Depth 8
+
+    try {
+        Send-RestRequest -Uri "$SupabaseUrl/rest/v1/rpc/enlace360_report_network_event" -Method "POST" -Headers $Headers -JsonBody $rpcBody | Out-Null
+        Write-Log "[INTEGRITY] Evento de integridad reportado a Supabase: $fingerprint"
+        $Integrity | Add-Member -NotePropertyName "last_reported_fingerprint" -NotePropertyValue $fingerprint -Force
+        $Integrity | Add-Member -NotePropertyName "last_reported_at" -NotePropertyValue $nowUtc -Force
+        $Integrity | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $IntegrityFile -Encoding UTF8 -Force
+        return
+    } catch {
+        Write-Log "[WARNING] RPC de integridad no disponible/fallo. Reintentando REST legado: $_"
+    }
+
     try {
         Send-RestRequest -Uri "$SupabaseUrl/rest/v1/network_events" -Method "POST" -Headers $Headers -JsonBody $bodyStr | Out-Null
-        Write-Log "[INTEGRITY] Evento de integridad reportado a Supabase: $fingerprint"
+        Write-Log "[INTEGRITY] Evento de integridad reportado a Supabase por REST legado: $fingerprint"
         $Integrity | Add-Member -NotePropertyName "last_reported_fingerprint" -NotePropertyValue $fingerprint -Force
         $Integrity | Add-Member -NotePropertyName "last_reported_at" -NotePropertyValue $nowUtc -Force
         $Integrity | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $IntegrityFile -Encoding UTF8 -Force
@@ -435,6 +500,30 @@ Function Report-IntegrityEvent {
 
 Function Submit-KioskPayload {
     param([System.Collections.IDictionary]$Payload)
+
+    $rpcBody = [ordered]@{
+        p_kiosk_id = $Payload.kiosk_id
+        p_client_name = $Payload.client_name
+        p_location = $Payload.location
+        p_status = $Payload.status
+        p_last_heartbeat = $Payload.last_heartbeat
+        p_uptime = $Payload.uptime
+        p_ip_address = $Payload.ip_address
+        p_mac_address = $Payload.mac_address
+        p_latency_ms = $Payload.latency_ms
+        p_integrity_status = $Payload.integrity_status
+        p_integrity_alert = $Payload.integrity_alert
+        p_integrity_checked_at = $Payload.integrity_checked_at
+        p_integrity_details = $Payload.integrity_details
+        p_agent_secret_hash = Get-Sha256Hex -Text $AgentSecret
+    }
+
+    try {
+        Send-RestRequest -Uri "$SupabaseUrl/rest/v1/rpc/enlace360_submit_kiosk_heartbeat" -Method "POST" -Headers $Headers -JsonBody ($rpcBody | ConvertTo-Json -Depth 8) | Out-Null
+        return $true
+    } catch {
+        Write-Log "[WARNING] RPC heartbeat seguro no disponible/fallo. Reintentando REST legado: $_"
+    }
 
     $headersUpsert = $Headers.Clone()
     $headersUpsert.Add("Prefer", "resolution=merge-duplicates")
@@ -506,15 +595,19 @@ Function Update-KioskStatus {
 }
 
 Function Check-RemoteCommands {
-    $encodedKioskName = [uri]::EscapeDataString($KioskName)
-    $url = $SupabaseUrl + "/rest/v1/remote_commands?kiosk_id=eq." + $encodedKioskName + "&status=eq.pending"
+    # status=eq.pending ahora se filtra dentro de enlace360_claim_remote_commands.
+    $url = "$SupabaseUrl/rest/v1/rpc/enlace360_claim_remote_commands"
+    $claimBody = @{
+        p_kiosk_id = $KioskName
+        p_limit = 5
+    } | ConvertTo-Json
 
     try {
-        $commandsRaw = Invoke-EnlaceRestJson -Uri $url -Method "GET" -Headers $Headers
+        $commandsRaw = Invoke-EnlaceRestJson -Uri $url -Method "POST" -Headers $Headers -JsonBody $claimBody
         if ($null -eq $commandsRaw) { return }
         $commands = @($commandsRaw)
         if ($commands.Count -gt 0) {
-            Write-Log "[TERMINAL C2] $($commands.Count) comando(s) pendiente(s) detectado(s)."
+            Write-Log "[TERMINAL C2] $($commands.Count) comando(s) reclamado(s) por RPC seguro."
         }
 
         foreach ($cmd in $commands) {
@@ -545,25 +638,22 @@ Function Check-RemoteCommands {
             if ([string]::IsNullOrWhiteSpace($output)) { $output = "Comando ejecutado sin salida (Success)." }
             if ($output.Length -gt 4000) { $output = $output.Substring(0, 4000) + "...[Truncado]" }
 
-            $updateUrl = "$SupabaseUrl/rest/v1/remote_commands?id=eq.$($cmd.id)"
-            $headersPatch = $Headers.Clone()
-            $headersPatch.Add("Prefer", "return=minimal")
-
             $bodyStr = @{
-                status = $execStatus
-                output_log = $output.Trim()
-                executed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                p_command_id = $cmd.id
+                p_kiosk_id = $KioskName
+                p_status = $execStatus
+                p_output_log = $output.Trim()
             } | ConvertTo-Json
 
             try {
-                Send-RestRequest -Uri $updateUrl -Method "PATCH" -Headers $headersPatch -JsonBody $bodyStr | Out-Null
-                Write-Log "[TERMINAL C2] Comando reportado a Supabase."
+                Send-RestRequest -Uri "$SupabaseUrl/rest/v1/rpc/enlace360_complete_remote_command" -Method "POST" -Headers $Headers -JsonBody $bodyStr | Out-Null
+                Write-Log "[TERMINAL C2] Comando reportado a Supabase por RPC seguro."
             } catch {
                 Write-Log "[WARNING] Fallo al devolver log a Supabase. Error: $_"
             }
         }
     } catch {
-        Write-Log "[WARNING] Fallo consultando comandos remotos: $_"
+        Write-Log "[WARNING] Fallo consultando comandos remotos por RPC seguro: $_"
     }
 }
 
@@ -584,9 +674,27 @@ Function Report-NetworkIncident {
         diagnostics = $DiagnosticsObj
     } | ConvertTo-Json -Depth 5
 
+    $rpcBody = @{
+        p_kiosk_id = $KioskName
+        p_client_name = $ClientName
+        p_location = $Location
+        p_offline_time = $offUtc
+        p_online_time = $onUtc
+        p_probable_cause = $Cause
+        p_diagnostics = $DiagnosticsObj
+    } | ConvertTo-Json -Depth 5
+
+    try {
+        Send-RestRequest -Uri "$SupabaseUrl/rest/v1/rpc/enlace360_report_network_event" -Method "POST" -Headers $Headers -JsonBody $rpcBody | Out-Null
+        Write-Log "Incidente de red reportado a Supabase por RPC seguro."
+        return $true
+    } catch {
+        Write-Log "[WARNING] RPC de incidente no disponible/fallo. Reintentando REST legado: $_"
+    }
+
     try {
         Send-RestRequest -Uri $url -Method "POST" -Headers $Headers -JsonBody $bodyStr | Out-Null
-        Write-Log "Incidente de red reportado a Supabase."
+        Write-Log "Incidente de red reportado a Supabase por REST legado."
         return $true
     } catch {
         Write-Log "[ERROR] Fallo reportando incidente: $_"

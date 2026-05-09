@@ -4,8 +4,8 @@ Repositorio del dashboard y del agente Windows Enlace360 para monitoreo de kiosc
 
 ## Version Operativa
 
-- Kit: `SYSTEM-2026-05-01.5`
-- Agente: `v3.6`
+- Kit: `SYSTEM-2026-05-09.1`
+- Agente: `v3.8`
 - Ruta Windows: `C:\ProgramData\Enlace360\Agent`
 - Tareas Windows esperadas:
   - `Enlace360_Agent`
@@ -22,7 +22,7 @@ Enlace360_SYSTEM_20260503_v6/
 El agente principal `Agente_Enlace360_Service.ps1` corre como `NT AUTHORITY\SYSTEM` y contiene:
 
 - heartbeat hacia Supabase
-- C2 real via `remote_commands`
+- C2 real via RPC segura sobre `remote_commands`
 - reporte de eventos en `network_events`
 - self-healing de red
 - protocolo Lazaro con limite diario
@@ -47,6 +47,12 @@ El instalador solicita:
 Luego registra las tareas SYSTEM, arranca el agente y ejecuta una verificacion rapida.
 
 ## Verificacion
+
+Para probar terminal remota/C2 con el esquema seguro, definir antes el secreto admin en la sesion que ejecuta el verificador:
+
+```text
+set ENLACE360_C2_ADMIN_SECRET=CAMBIA_ESTE_TOKEN_ADMIN
+```
 
 Despues de instalar o reiniciar el PC cliente, ejecutar como Administrador:
 

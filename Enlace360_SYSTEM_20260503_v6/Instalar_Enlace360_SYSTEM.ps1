@@ -3,11 +3,12 @@ param(
     [string]$ClientName = "Cenco Malls",
     [string]$Location = "Costanera",
     [string]$KioskName = "02 VTR - PB",
+    [string]$AgentSecret = "",
     [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
-$InstallerVersion = "SYSTEM-2026-05-08.1"
+$InstallerVersion = "SYSTEM-2026-05-09.1"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PreferredLogFile = "C:\Enlace360_SYSTEM_installer.log"
 $LogFile = $PreferredLogFile
@@ -48,6 +49,17 @@ function Write-TextFileUtf8 {
     param([string]$Path, [string]$Text)
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($Path, $Text, $utf8NoBom)
+}
+
+function New-AgentSecret {
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+        return [Convert]::ToBase64String($bytes)
+    } finally {
+        $rng.Dispose()
+    }
 }
 
 function Stop-DeleteTask {
@@ -448,6 +460,7 @@ Log "SourceDir=$SourceDir"
 Log "DryRun=$DryRun"
 
 if (-not $DryRun) { Assert-Admin }
+if ([string]::IsNullOrWhiteSpace($AgentSecret)) { $AgentSecret = New-AgentSecret }
 
 $AgentSource = Join-Path $SourceDir "Agente_Enlace360_Service.ps1"
 $VerifierSource = Join-Path $SourceDir "Verificar_Enlace360_SYSTEM.ps1"
@@ -492,6 +505,7 @@ Log "Escribiendo config"
     ClientName = $ClientName
     Location = $Location
     KioskName = $KioskName
+    AgentSecret = $AgentSecret
 } | ConvertTo-Json | Set-Content -LiteralPath $ConfigPath -Encoding UTF8 -Force
 
 Remove-Item -LiteralPath (Join-Path $InstallDir "c2.lock"),(Join-Path $InstallDir "last_heartbeat.txt"),(Join-Path $InstallDir "network_state.json") -Force -ErrorAction SilentlyContinue

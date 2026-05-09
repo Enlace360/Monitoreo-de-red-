@@ -4,6 +4,32 @@ import { Monitor, AlertTriangle, CheckCircle, ServerCrash, X, FileSearch, Shield
 import './index.css'
 
 const AGENT_UPDATE_COMMAND = "$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $dir = 'C:\\ProgramData\\Enlace360\\Agent'; $agent = Join-Path $dir 'Agente_Enlace360_Service.ps1'; $cache = Join-Path $dir 'agent_payload.cache'; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile $agent -UseBasicParsing; [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent)) | Set-Content -Path $cache -Encoding ASCII -Force; Write-Output 'Descarga completada. Cache local actualizado.'"
+const HEARTBEAT_OFFLINE_THRESHOLD_MINUTES = 10
+const STALE_HEARTBEAT_BANNER_RATIO = 0.5
+
+const getHeartbeatAgeMinutes = (lastHeartbeat) => {
+  if (!lastHeartbeat) return null
+  const timestamp = new Date(lastHeartbeat).getTime()
+  if (Number.isNaN(timestamp)) return null
+  return Math.max(0, (Date.now() - timestamp) / 60000)
+}
+
+const formatHeartbeatAge = (minutes) => {
+  if (minutes === null) return 'Sin heartbeat'
+  if (minutes < 1) return 'Hace menos de 1 min'
+  if (minutes < 60) return `Hace ${Math.floor(minutes)} min`
+
+  const totalMinutes = Math.floor(minutes)
+  const hours = Math.floor(totalMinutes / 60)
+  const remainingMinutes = totalMinutes % 60
+  if (hours < 24) {
+    return remainingMinutes > 0 ? `Hace ${hours} h ${remainingMinutes} min` : `Hace ${hours} h`
+  }
+
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return remainingHours > 0 ? `Hace ${days} d ${remainingHours} h` : `Hace ${days} d`
+}
 
 const getIntegrityInfo = (kiosk = {}) => {
   const status = String(kiosk.integrity_status || 'unknown').toLowerCase()
@@ -30,12 +56,14 @@ function App() {
   const [selectedClient, setSelectedClient] = useState('Todos')
 
   const [loading, setLoading] = useState(true)
+  const [dataError, setDataError] = useState(null)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showGlossary, setShowGlossary] = useState(false)
 
   // AI Copilot States
   const [showSettings, setShowSettings] = useState(false)
   const [apiKey, setApiKey] = useState(localStorage.getItem('enlace360_ai_key') || '')
+  const [c2AdminSecret, setC2AdminSecret] = useState(sessionStorage.getItem('enlace360_c2_admin_secret') || '')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResponse, setAiResponse] = useState(null)
 
@@ -47,6 +75,15 @@ function App() {
   const saveApiKey = (key) => {
     setApiKey(key)
     localStorage.setItem('enlace360_ai_key', key)
+  }
+
+  const saveC2AdminSecret = (key) => {
+    setC2AdminSecret(key)
+    if (key.trim()) {
+      sessionStorage.setItem('enlace360_c2_admin_secret', key)
+    } else {
+      sessionStorage.removeItem('enlace360_c2_admin_secret')
+    }
   }
 
   const analyzeWithAI = async (event) => {
@@ -97,20 +134,31 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
 
   // C2 Functions
   const fetchRemoteCommands = useCallback(async (kioskId) => {
-    const { data, error } = await supabase
-      .from('remote_commands')
-      .select('*')
-      .eq('kiosk_id', kioskId)
-      .order('created_at', { ascending: false })
-      .limit(20)
+    if (!c2AdminSecret.trim()) {
+      setRemoteCommands([])
+      return
+    }
+    const { data, error } = await supabase.rpc('enlace360_list_remote_commands', {
+      p_admin_secret: c2AdminSecret,
+      p_kiosk_id: kioskId,
+      p_limit: 20
+    })
     if (!error && data) setRemoteCommands(data)
-  }, [])
+  }, [c2AdminSecret])
 
   const sendCommand = async (cmdString) => {
     if (!cmdString.trim() || !terminalKiosk) return
-    const { error } = await supabase
-      .from('remote_commands')
-      .insert([{ kiosk_id: terminalKiosk, command_string: cmdString, status: 'pending' }])
+    if (!c2AdminSecret.trim()) {
+      alert('Configura el token C2 Admin antes de enviar comandos.')
+      setShowSettings(true)
+      return
+    }
+    const { error } = await supabase.rpc('enlace360_enqueue_remote_command', {
+      p_admin_secret: c2AdminSecret,
+      p_kiosk_id: terminalKiosk,
+      p_command_string: cmdString,
+      p_requested_by: 'dashboard'
+    })
     if (!error) {
       setCommandInput('')
       fetchRemoteCommands(terminalKiosk)
@@ -125,12 +173,20 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       alert('No hay kioscos visibles para actualizar.')
       return
     }
+    if (!c2AdminSecret.trim()) {
+      alert('Configura el token C2 Admin antes de actualizar agentes.')
+      setShowSettings(true)
+      return
+    }
     if (!window.confirm(`¿Actualizar el agente en ${targetKiosks.length} kioscos? El cambio se aplicará automáticamente.`)) return
     let sent = 0
     for (const kiosk of targetKiosks) {
-      const { error } = await supabase
-        .from('remote_commands')
-        .insert([{ kiosk_id: kiosk.kiosk_id, command_string: AGENT_UPDATE_COMMAND, status: 'pending' }])
+      const { error } = await supabase.rpc('enlace360_enqueue_remote_command', {
+        p_admin_secret: c2AdminSecret,
+        p_kiosk_id: kiosk.kiosk_id,
+        p_command_string: AGENT_UPDATE_COMMAND,
+        p_requested_by: 'dashboard'
+      })
       if (!error) sent++
     }
     alert(`Comando de actualización enviado a ${sent}/${targetKiosks.length} kioscos.`)
@@ -177,85 +233,52 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
 
   const fetchData = useCallback(async () => {
     try {
-      const { data: kiosksData } = await supabase
+      setDataError(null)
+
+      const { data: kiosksData, error: kiosksError } = await supabase
         .from('kiosks')
-        .select('*')
+        .select('kiosk_id,client_name,location,status,last_heartbeat,uptime,ip_address,mac_address,latency_ms,integrity_status,integrity_alert,integrity_checked_at,integrity_details,created_at,updated_at')
         .order('kiosk_id', { ascending: true })
 
-      const { data: eventsData } = await supabase
+      if (kiosksError) {
+        throw new Error(`kiosks: ${kiosksError.message}`)
+      }
+
+      const { data: eventsData, error: eventsError } = await supabase
         .from('network_events')
-        .select('*')
+        .select('id,kiosk_id,client_name,location,offline_time,online_time,probable_cause,diagnostics,created_at')
         .order('offline_time', { ascending: false })
         .limit(30)
+
+      if (eventsError) {
+        throw new Error(`network_events: ${eventsError.message}`)
+      }
 
       let rawKiosks = kiosksData || []
       let finalEvents = eventsData || []
 
       // Lógica de Heartbeat (Latido)
-      // Si el equipo no ha reportado latido en más de 6 minutos, asumimos que está apagado
+      // Si el equipo no ha reportado latido en más de 10 minutos, asumimos que está apagado
       let finalKiosks = rawKiosks.map(kiosk => {
-        if (kiosk.status === 'online' && kiosk.last_heartbeat) {
-          const lastHeartbeatTime = new Date(kiosk.last_heartbeat).getTime()
-          const currentTime = new Date().getTime()
-          const minutesSince = (currentTime - lastHeartbeatTime) / 60000
+        const heartbeatAgeMinutes = getHeartbeatAgeMinutes(kiosk.last_heartbeat)
+        const heartbeatStale = heartbeatAgeMinutes === null || heartbeatAgeMinutes > HEARTBEAT_OFFLINE_THRESHOLD_MINUTES
+        const kioskWithHeartbeat = {
+          ...kiosk,
+          heartbeat_age_minutes: heartbeatAgeMinutes,
+          heartbeat_label: formatHeartbeatAge(heartbeatAgeMinutes),
+          heartbeat_stale: heartbeatStale
+        }
 
-          if (minutesSince > 10) {
-            return { ...kiosk, status: 'offline', uptime: 'Apagado o Sin Red' }
+        if (kiosk.status === 'online') {
+          if (heartbeatStale) {
+            return { ...kioskWithHeartbeat, status: 'offline', uptime: 'Apagado o Sin Red' }
           }
-
           if (kiosk.latency_ms && kiosk.latency_ms > 500) {
-            return { ...kiosk, status: 'degraded', uptime: `${kiosk.latency_ms}ms (Lento)` }
+            return { ...kioskWithHeartbeat, status: 'degraded', uptime: `${kiosk.latency_ms}ms (Lento)` }
           }
         }
-        return kiosk
+        return kioskWithHeartbeat
       })
-
-      if (finalKiosks.length === 0) {
-        finalKiosks = []
-        finalEvents = []
-
-        const malls = ['Mall La Reina', 'Mall La Florida', 'Mall La Dehesa']
-
-        malls.forEach((mall, mallIndex) => {
-          // Generamos 10 equipos por sucursal
-          for (let i = 1; i <= 10; i++) {
-            // Decidimos cuáles están caídos (ej. el 3 siempre, y el 7 en algunos)
-            const isOffline = (i === 3 || (i === 7 && mallIndex !== 2))
-            const kioskPrefix = mall.replace('Mall La ', '').toUpperCase()
-            const kioskId = `TOTEM-${kioskPrefix}-${i.toString().padStart(2, '0')}`
-
-            finalKiosks.push({
-              kiosk_id: kioskId,
-              client_name: 'Cenco Malls',
-              location: mall,
-              status: isOffline ? 'offline' : 'online',
-              uptime: isOffline ? 'Desconocido' : `${Math.floor(Math.random() * 14) + 1} días, ${Math.floor(Math.random() * 12)} horas`
-            })
-
-            if (isOffline) {
-              const cause = i === 3 ? 'CABLE DESCONECTADO O PUERTO APAGADO (Falla de Capa 1)' : 'GATEWAY INACCESIBLE. Posible falla de switch/router.';
-              finalEvents.push({
-                id: Math.random().toString(),
-                kiosk_id: kioskId,
-                client_name: 'Cenco Malls',
-                location: mall,
-                // Fecha de caída aleatoria en las últimas horas
-                offline_time: new Date(Date.now() - Math.random() * 86400000).toISOString(),
-                probable_cause: cause,
-                diagnostics: {
-                  Timestamp: new Date().toISOString(),
-                  Uptime: "14 días, 3 horas",
-                  GatewayIP: "192.168.1.1",
-                  GatewayReachable: i !== 3,
-                  Adapters: [
-                    { Name: "Ethernet", InterfaceDescription: "Intel Gigabit Network", Status: i === 3 ? "Disconnected" : "Up" }
-                  ]
-                }
-              })
-            }
-          }
-        })
-      }
 
       setAllKiosks(finalKiosks)
       setAllEvents(finalEvents)
@@ -266,10 +289,16 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
       // Si solo hay un cliente, autoseleccionarlo en lugar de 'Todos' para mejor UX
       if (uniqueClients.length === 1 && selectedClient === 'Todos') {
         setSelectedClient(uniqueClients[0])
+      } else if (selectedClient !== 'Todos' && !uniqueClients.includes(selectedClient)) {
+        setSelectedClient('Todos')
       }
 
     } catch (error) {
       console.error('Error fetching data:', error.message)
+      setDataError(`No se pudo leer Supabase: ${error.message}`)
+      setAllKiosks([])
+      setAllEvents([])
+      setClients([])
     } finally {
       setLoading(false)
     }
@@ -312,6 +341,12 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
   const offlineCount = filteredKiosks.filter(k => k.status === 'offline').length
   const integrityCount = filteredKiosks.filter(k => ['critical', 'warning'].includes(getIntegrityInfo(k).status)).length
   const totalCount = filteredKiosks.length
+  const staleHeartbeatCount = filteredKiosks.filter(k => k.heartbeat_stale).length
+  const staleHeartbeatRatio = totalCount > 0 ? staleHeartbeatCount / totalCount : 0
+  const showHeartbeatBanner = totalCount > 0 && staleHeartbeatRatio >= STALE_HEARTBEAT_BANNER_RATIO
+  const heartbeatBannerText = staleHeartbeatCount === totalCount
+    ? `Heartbeats vencidos: ${staleHeartbeatCount}/${totalCount} equipos llevan mas de ${HEARTBEAT_OFFLINE_THRESHOLD_MINUTES} min sin latido.`
+    : `Heartbeats vencidos: ${staleHeartbeatCount}/${totalCount} equipos llevan mas de ${HEARTBEAT_OFFLINE_THRESHOLD_MINUTES} min sin latido.`
 
   // Agrupar los kioscos filtrados por Sucursal (location)
   const kiosksByLocation = filteredKiosks.reduce((acc, kiosk) => {
@@ -353,12 +388,26 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
           >
             <Settings size={20} />
           </button>
-          <div className="header-status">
+          <div className={`header-status ${dataError ? 'error' : totalCount === 0 ? 'idle' : ''}`}>
             <div className="live-dot"></div>
-            Monitoreo Activo
+            {dataError ? 'Error Supabase' : totalCount === 0 ? 'Sin datos' : 'Monitoreo Activo'}
           </div>
         </div>
       </header>
+
+      {dataError && (
+        <div className="data-banner error">
+          <AlertTriangle size={18} />
+          <span>{dataError}</span>
+        </div>
+      )}
+
+      {!dataError && showHeartbeatBanner && (
+        <div className="data-banner warning">
+          <Clock size={18} />
+          <span>{heartbeatBannerText}</span>
+        </div>
+      )}
 
       <div className="stats-row">
         <div className="glass-panel stat-card">
@@ -412,6 +461,13 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
           </h2>
 
           <div className="locations-container">
+            {Object.entries(kiosksByLocation).length === 0 && (
+              <div className="empty-state">
+                <Monitor size={32} color="var(--text-muted)" />
+                <h3>No hay kioscos registrados</h3>
+                <p>El dashboard no mostrará datos de prueba. Cuando los agentes reporten a Supabase, aparecerán aquí.</p>
+              </div>
+            )}
             {Object.entries(kiosksByLocation).map(([location, groupKiosks]) => (
               <div key={location} className="location-group">
                 <h3 className="location-title">
@@ -436,6 +492,12 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                         })()}
                         <div className="kiosk-name">{kiosk.kiosk_id}</div>
                         <div className="kiosk-uptime">{(kiosk.uptime || 'Iniciando...').split(' | ')[0]}</div>
+                        <div
+                          className={`kiosk-heartbeat ${kiosk.heartbeat_stale ? 'stale' : 'fresh'}`}
+                          title={kiosk.last_heartbeat ? `Último heartbeat: ${new Date(kiosk.last_heartbeat).toLocaleString()}` : 'Sin heartbeat registrado'}
+                        >
+                          <Clock size={12} /> {kiosk.heartbeat_label}
+                        </div>
                         {integrity.status !== 'ok' && (
                           <div className={`integrity-pill ${integrity.status}`} title={integrity.title}>
                             {integrity.label}
@@ -683,6 +745,11 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
             </div>
             
             <div className="modal-body" style={{ padding: '20px 0 0 0' }}>
+              {!c2AdminSecret.trim() && (
+                <div style={{ marginBottom: '15px', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,145,0,0.35)', background: 'rgba(255,145,0,0.08)', color: 'var(--status-warning)', fontSize: '0.9rem' }}>
+                  Configura el token C2 Admin en ajustes para ver historial y enviar comandos.
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('ipconfig /flushdns')}>Limpiar DNS</button>
                 <button className="quick-cmd-btn" onClick={() => sendCommand('Get-NetAdapter -Physical | Restart-NetAdapter')}>Reiniciar Red</button>
@@ -738,6 +805,17 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               <p style={{ color: 'var(--text-muted)', marginBottom: '20px', lineHeight: '1.5' }}>
                 El <strong>Copiloto IA</strong> actualmente está funcionando en modo de pruebas mediante una API gratuita y abierta (Pollinations). No necesitas ninguna llave por ahora.
               </p>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>Token C2 Admin</label>
+                <input
+                  type="password"
+                  value={c2AdminSecret}
+                  onChange={(e) => saveC2AdminSecret(e.target.value)}
+                  placeholder="Requerido para terminal remota"
+                  style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', padding: '12px', borderRadius: '8px', outline: 'none', fontFamily: 'monospace' }}
+                />
+              </div>
 
               <div style={{ marginBottom: '20px', opacity: 0.5, pointerEvents: 'none' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: 'var(--brand-cyan)' }}>Google Gemini API Key</label>

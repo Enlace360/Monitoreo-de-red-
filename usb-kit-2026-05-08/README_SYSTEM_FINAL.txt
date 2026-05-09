@@ -1,5 +1,5 @@
 ENLACE360 - KIT SYSTEM
-Version kit: SYSTEM-2026-05-08.1
+Version kit: SYSTEM-2026-05-09.1
 
 Objetivo:
 Instalar el agente en C:\ProgramData\Enlace360\Agent como servicio Windows
@@ -9,7 +9,11 @@ diagnostico forense e integridad visible en el dashboard.
 Antes de instalar:
 1. Ejecutar en Supabase el archivo supabase_schema.sql actualizado.
 2. Verificar que el equipo tenga salida HTTPS a Supabase.
-3. Para uso offline de USB, copiar tambien Enlace360Agent.exe junto al kit.
+3. Configurar el secreto C2 Admin en Supabase antes de usar terminal remota:
+   SELECT encode(digest('CAMBIA_ESTE_TOKEN_ADMIN', 'sha256'), 'hex');
+   ALTER DATABASE postgres SET app.enlace360_admin_secret_sha256 = '<hash>';
+   NOTIFY pgrst, 'reload config';
+4. Para uso offline de USB, copiar tambien Enlace360Agent.exe junto al kit.
    Si no existe, el instalador descargara WinSW desde GitHub.
 
 Copiar al PC cliente estos archivos:
@@ -58,7 +62,7 @@ Post-reinicio:
    - servicio Enlace360Agent running/automatic
    - tareas Enlace360_Agent y Enlace360_HealthCheck
    - heartbeat fresco en Supabase
-   - C2 real ejecutado
+   - C2 real ejecutado si ENLACE360_C2_ADMIN_SECRET esta definido
    - recuperacion por HealthCheck
    - restauracion si falta el archivo del agente
    - recreacion si falta la tarea principal
@@ -80,7 +84,7 @@ Si El PC Ya Tiene Un Agente Anterior:
 3. No usar reparadores antiguos ni scripts viejos para actualizar equipos sanos.
 
 Si aparece ERROR 5 Acceso denegado:
-1. Usar este kit SYSTEM-2026-05-08.1 o superior.
+1. Usar este kit SYSTEM-2026-05-09.1 o superior.
 2. No borrar manualmente C:\ProgramData\Enlace360\Agent si necesitas preservar evidencia.
 3. Si solo quieres recuperar el equipo, el instalador se encarga de resetear permisos con takeown/icacls antes de copiar.
 4. Si el error persiste despues de reiniciar, ejecutar Diagnosticar_Enlace360_SYSTEM.bat y enviar el ZIP.
