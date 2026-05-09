@@ -6,6 +6,66 @@ import './index.css'
 const AGENT_UPDATE_COMMAND = "$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $dir = 'C:\\ProgramData\\Enlace360\\Agent'; $agent = Join-Path $dir 'Agente_Enlace360_Service.ps1'; $cache = Join-Path $dir 'agent_payload.cache'; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile $agent -UseBasicParsing; [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent)) | Set-Content -Path $cache -Encoding ASCII -Force; Write-Output 'Descarga completada. Cache local actualizado.'"
 const HEARTBEAT_OFFLINE_THRESHOLD_MINUTES = 10
 const STALE_HEARTBEAT_BANNER_RATIO = 0.5
+const DEFAULT_EVENT_FILTER = 'impact'
+const EVENT_FILTERS = [
+  { id: 'impact', label: 'Impacto real' },
+  { id: 'high', label: 'Críticos' },
+  { id: 'low', label: 'Auto-Reparado' },
+  { id: 'all', label: 'Todos' }
+]
+const EVENT_IMPACT_META = {
+  high: {
+    label: 'Crítico',
+    title: 'Evento abierto o causa física/local que requiere atención.',
+    color: 'var(--status-offline)'
+  },
+  medium: {
+    label: 'Impacto',
+    title: 'Evento recuperado o falla de conectividad externa/intermedia.',
+    color: 'var(--status-warning)'
+  },
+  low: {
+    label: 'Menor',
+    title: 'Micro-corte auto-reparado por el agente.',
+    color: 'var(--status-online)'
+  }
+}
+
+const getEventImpact = (event = {}) => {
+  const cause = String(event.probable_cause || '').toUpperCase()
+  if (cause.includes('AUTO-REPARADO')) return 'low'
+  if (!event.online_time) return 'high'
+  if (cause.includes('CABLE') || cause.includes('GATEWAY') || cause.includes('DHCP')) return 'high'
+  return 'medium'
+}
+
+const matchesEventFilter = (event, filterId) => {
+  const impact = getEventImpact(event)
+  if (filterId === 'all') return true
+  if (filterId === 'impact') return impact !== 'low'
+  return impact === filterId
+}
+
+const formatEventDate = (value) => {
+  if (!value) return 'Sin fecha'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Fecha inválida'
+
+  const now = new Date()
+  const dayStart = (input) => new Date(input.getFullYear(), input.getMonth(), input.getDate()).getTime()
+  const dayDiff = Math.round((dayStart(now) - dayStart(date)) / 86400000)
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  if (dayDiff === 0) return `Hoy ${time}`
+  if (dayDiff === 1) return `Ayer ${time}`
+
+  const compactDate = date
+    .toLocaleDateString('es-CL', { day: '2-digit', month: 'short' })
+    .replace('.', '')
+    .replace(/^(\d{2})\s+(.+)$/, (_, day, month) => `${day} ${month.charAt(0).toUpperCase()}${month.slice(1)}`)
+
+  return `${compactDate} ${time}`
+}
 
 const getHeartbeatAgeMinutes = (lastHeartbeat) => {
   if (!lastHeartbeat) return null
@@ -82,6 +142,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [dataError, setDataError] = useState(null)
   const [selectedEvent, setSelectedEvent] = useState(null)
+  const [eventFilter, setEventFilter] = useState(DEFAULT_EVENT_FILTER)
   const [showGlossary, setShowGlossary] = useState(false)
 
   // AI Copilot States
@@ -360,6 +421,11 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
 
   const filteredKiosks = selectedClient === 'Todos' ? allKiosks : allKiosks.filter(k => k.client_name === selectedClient)
   const filteredEvents = selectedClient === 'Todos' ? allEvents : allEvents.filter(e => e.client_name === selectedClient)
+  const visibleEvents = filteredEvents.filter(event => matchesEventFilter(event, eventFilter))
+  const eventFilterCounts = EVENT_FILTERS.reduce((counts, filter) => {
+    counts[filter.id] = filteredEvents.filter(event => matchesEventFilter(event, filter.id)).length
+    return counts
+  }, {})
 
   const onlineCount = filteredKiosks.filter(k => k.status === 'online').length
   const offlineCount = filteredKiosks.filter(k => k.status === 'offline').length
@@ -566,24 +632,48 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
               </button>
             </div>
           </div>
+          <div className="event-filters" role="group" aria-label="Filtrar últimas caídas por impacto">
+            {EVENT_FILTERS.map(filter => (
+              <button
+                key={filter.id}
+                type="button"
+                className={`event-filter-btn ${eventFilter === filter.id ? 'active' : ''}`}
+                onClick={() => setEventFilter(filter.id)}
+              >
+                <span>{filter.label}</span>
+                <strong>{eventFilterCounts[filter.id] || 0}</strong>
+              </button>
+            ))}
+          </div>
           <div className="events-list">
             {filteredEvents.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', marginTop: '2rem' }}>
                 No hay incidentes recientes.
               </p>
+            ) : visibleEvents.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center', marginTop: '2rem' }}>
+                No hay incidentes para este filtro.
+              </p>
             ) : (
-              filteredEvents.map((ev, idx) => (
-                <div key={idx} className="event-item" onClick={() => setSelectedEvent(ev)}>
-                  <div className="event-header">
-                    <span className="event-kiosk"><ShieldAlert size={16} color="var(--status-offline)" /> {ev.kiosk_id}</span>
-                    <span className="event-time">
-                      {new Date(ev.offline_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+              visibleEvents.map((ev, idx) => {
+                const impact = getEventImpact(ev)
+                const impactMeta = EVENT_IMPACT_META[impact] || EVENT_IMPACT_META.medium
+                return (
+                  <div key={idx} className={`event-item impact-${impact}`} onClick={() => setSelectedEvent(ev)}>
+                    <div className="event-header">
+                      <span className="event-kiosk"><ShieldAlert size={16} color={impactMeta.color} /> {ev.kiosk_id}</span>
+                      <div className="event-meta">
+                        <span className={`event-impact-badge ${impact}`} title={impactMeta.title}>{impactMeta.label}</span>
+                        <span className="event-time">
+                          {formatEventDate(ev.offline_time)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="event-location"><MapPin size={12} /> {ev.location || 'Sede Principal'}</div>
+                    <p className="event-cause">{ev.probable_cause}</p>
                   </div>
-                  <div className="event-location"><MapPin size={12} /> {ev.location || 'Sede Principal'}</div>
-                  <p className="event-cause">{ev.probable_cause}</p>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </aside>
