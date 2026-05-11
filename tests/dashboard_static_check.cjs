@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'dashboard', 'src', 'App.jsx'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'dashboard', 'src', 'index.css'), 'utf8');
 const supabaseClient = fs.readFileSync(path.join(root, 'dashboard', 'src', 'supabaseClient.js'), 'utf8');
+const kioskTime = fs.readFileSync(path.join(root, 'dashboard', 'src', 'kioskTime.js'), 'utf8');
 
 function includes(expected, label = expected) {
   assert(app.includes(expected), `dashboard must include: ${label}`);
@@ -22,6 +23,10 @@ includes('heartbeat_label', 'dashboard exposes heartbeat age label');
 includes('heartbeat_stale', 'dashboard tracks stale heartbeats');
 includes('data-banner warning', 'dashboard warns when most heartbeats are stale');
 includes('kiosk-heartbeat', 'dashboard displays heartbeat age per kiosk');
+includes('latestRecoveriesData', 'dashboard fetches latest recovered outage times for online duration');
+includes('buildLatestRecoveryByKiosk', 'dashboard derives latest recovery by kiosk');
+includes('online_duration_label', 'dashboard exposes online duration label per kiosk');
+includes('Uptime Windows', 'dashboard keeps Windows uptime as secondary metadata');
 includes('terminalKioskInfo', 'dashboard derives terminal kiosk details from current data');
 includes('terminal-device-meta', 'terminal modal displays device network identifiers');
 includes('terminalKioskInfo?.ip_address', 'terminal modal shows kiosk IP');
@@ -43,6 +48,9 @@ includes('event-impact-badge', 'dashboard shows impact badge per event');
 includes('formatEventDate(ev.offline_time)', 'dashboard shows compact date and time instead of only time');
 includes('getIntegrityInfo', 'dashboard computes integrity display state');
 includes('getAgentVersion', 'dashboard parses agent version from uptime');
+assert(kioskTime.includes('formatOnlineDuration'), 'dashboard time helper formats online duration');
+assert(kioskTime.includes('getOnlineSince'), 'dashboard time helper derives online start time');
+assert(kioskTime.includes("cause.includes('INTEGRIDAD AGENTE')"), 'dashboard online duration ignores integrity events');
 includes('isIntegrityCapableVersion', 'dashboard distinguishes legacy agents from v3.8 integrity-capable agents');
 includes('Pendiente v3.8', 'dashboard labels legacy agents as pending v3.8 instead of failed integrity');
 includes('Integridad pendiente', 'dashboard labels v3.8 unknown integrity separately');

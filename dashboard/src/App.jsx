@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
 import { Monitor, AlertTriangle, CheckCircle, ServerCrash, X, FileSearch, ShieldAlert, Clock, Network, MapPin, Download, HelpCircle, Settings, Sparkles, Terminal, Send } from 'lucide-react'
+import {
+  buildLatestRecoveryByKiosk,
+  formatHeartbeatAge,
+  formatOnlineDuration,
+  getAgentVersion,
+  getHeartbeatAgeMinutes,
+  getOnlineSince,
+  splitUptimeVersion
+} from './kioskTime'
 import './index.css'
 
 const AGENT_UPDATE_COMMAND = "$ProgressPreference = 'SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $dir = 'C:\\ProgramData\\Enlace360\\Agent'; $agent = Join-Path $dir 'Agente_Enlace360_Service.ps1'; $cache = Join-Path $dir 'agent_payload.cache'; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1' -OutFile $agent -UseBasicParsing; [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($agent)) | Set-Content -Path $cache -Encoding ASCII -Force; Write-Output 'Descarga completada. Cache local actualizado.'"
@@ -65,35 +74,6 @@ const formatEventDate = (value) => {
     .replace(/^(\d{2})\s+(.+)$/, (_, day, month) => `${day} ${month.charAt(0).toUpperCase()}${month.slice(1)}`)
 
   return `${compactDate} ${time}`
-}
-
-const getHeartbeatAgeMinutes = (lastHeartbeat) => {
-  if (!lastHeartbeat) return null
-  const timestamp = new Date(lastHeartbeat).getTime()
-  if (Number.isNaN(timestamp)) return null
-  return Math.max(0, (Date.now() - timestamp) / 60000)
-}
-
-const formatHeartbeatAge = (minutes) => {
-  if (minutes === null) return 'Sin heartbeat'
-  if (minutes < 1) return 'Hace menos de 1 min'
-  if (minutes < 60) return `Hace ${Math.floor(minutes)} min`
-
-  const totalMinutes = Math.floor(minutes)
-  const hours = Math.floor(totalMinutes / 60)
-  const remainingMinutes = totalMinutes % 60
-  if (hours < 24) {
-    return remainingMinutes > 0 ? `Hace ${hours} h ${remainingMinutes} min` : `Hace ${hours} h`
-  }
-
-  const days = Math.floor(hours / 24)
-  const remainingHours = hours % 24
-  return remainingHours > 0 ? `Hace ${days} d ${remainingHours} h` : `Hace ${days} d`
-}
-
-const getAgentVersion = (kiosk = {}) => {
-  const parts = String(kiosk.uptime || '').split(' | ')
-  return parts.length > 1 ? parts[1].trim() : ''
 }
 
 const isIntegrityCapableVersion = (version) => {
@@ -339,30 +319,58 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
         throw new Error(`network_events: ${eventsError.message}`)
       }
 
+      const { data: latestRecoveriesData, error: latestRecoveriesError } = await supabase
+        .from('network_events')
+        .select('kiosk_id,online_time,probable_cause')
+        .not('online_time', 'is', null)
+        .order('online_time', { ascending: false })
+        .limit(500)
+
+      if (latestRecoveriesError) {
+        throw new Error(`network_events recoveries: ${latestRecoveriesError.message}`)
+      }
+
       let rawKiosks = kiosksData || []
       let finalEvents = eventsData || []
+      const latestRecoveryByKiosk = buildLatestRecoveryByKiosk(latestRecoveriesData || [])
 
       // Lógica de Heartbeat (Latido)
       // Si el equipo no ha reportado latido en más de 10 minutos, asumimos que está apagado
       let finalKiosks = rawKiosks.map(kiosk => {
         const heartbeatAgeMinutes = getHeartbeatAgeMinutes(kiosk.last_heartbeat)
         const heartbeatStale = heartbeatAgeMinutes === null || heartbeatAgeMinutes > HEARTBEAT_OFFLINE_THRESHOLD_MINUTES
-        const kioskWithHeartbeat = {
+        const onlineSince = getOnlineSince(kiosk, latestRecoveryByKiosk)
+        const { systemUptime } = splitUptimeVersion(kiosk.uptime)
+        const agentVersion = getAgentVersion(kiosk)
+        let finalStatus = kiosk.status
+        let finalUptime = kiosk.uptime
+
+        if (kiosk.status === 'online') {
+          if (heartbeatStale) {
+            finalStatus = 'offline'
+            finalUptime = 'Apagado o Sin Red'
+          } else if (kiosk.latency_ms && kiosk.latency_ms > 500) {
+            finalStatus = 'degraded'
+            finalUptime = `${kiosk.latency_ms}ms (Lento)`
+          }
+        }
+
+        const isOnlineNow = finalStatus === 'online' || finalStatus === 'degraded'
+
+        return {
           ...kiosk,
+          status: finalStatus,
+          uptime: finalUptime,
+          agent_version: agentVersion,
+          system_uptime_label: systemUptime,
+          online_since: onlineSince,
+          online_duration_label: isOnlineNow
+            ? formatOnlineDuration(onlineSince)
+            : (finalUptime || 'Iniciando...').split(' | ')[0],
           heartbeat_age_minutes: heartbeatAgeMinutes,
           heartbeat_label: formatHeartbeatAge(heartbeatAgeMinutes),
           heartbeat_stale: heartbeatStale
         }
-
-        if (kiosk.status === 'online') {
-          if (heartbeatStale) {
-            return { ...kioskWithHeartbeat, status: 'offline', uptime: 'Apagado o Sin Red' }
-          }
-          if (kiosk.latency_ms && kiosk.latency_ms > 500) {
-            return { ...kioskWithHeartbeat, status: 'degraded', uptime: `${kiosk.latency_ms}ms (Lento)` }
-          }
-        }
-        return kioskWithHeartbeat
       })
 
       setAllKiosks(finalKiosks)
@@ -581,7 +589,12 @@ Explícale a un agente de soporte de Nivel 0 (sin conocimientos técnicos) qué 
                           ) : null
                         })()}
                         <div className="kiosk-name">{kiosk.kiosk_id}</div>
-                        <div className="kiosk-uptime">{(kiosk.uptime || 'Iniciando...').split(' | ')[0]}</div>
+                        <div
+                          className="kiosk-uptime"
+                          title={kiosk.system_uptime_label ? `Uptime Windows: ${kiosk.system_uptime_label}` : 'Sin uptime Windows'}
+                        >
+                          {kiosk.online_duration_label || (kiosk.uptime || 'Iniciando...').split(' | ')[0]}
+                        </div>
                         <div
                           className={`kiosk-heartbeat ${kiosk.heartbeat_stale ? 'stale' : 'fresh'}`}
                           title={kiosk.last_heartbeat ? `Último heartbeat: ${new Date(kiosk.last_heartbeat).toLocaleString()}` : 'Sin heartbeat registrado'}
