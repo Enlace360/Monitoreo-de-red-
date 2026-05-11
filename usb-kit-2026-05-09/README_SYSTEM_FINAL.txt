@@ -1,11 +1,15 @@
 ENLACE360 - KIT SYSTEM
-Version kit: SYSTEM-2026-05-09.2
-Agente incluido: v3.8
+Version kit: SYSTEM-2026-05-10.1
+Agente incluido: v3.8.1
 
 Objetivo:
 Instalar el agente en C:\ProgramData\Enlace360\Agent como servicio Windows
 Enlace360Agent, con tareas SYSTEM solo como respaldo, cache local de recuperacion,
 diagnostico forense e integridad visible en el dashboard.
+
+Cambios v3.8.1:
+- Hace deterministica la prueba de HealthCheck cuando el verificador dispara Enlace360_HealthCheck manualmente.
+- Re-chequea el servicio Enlace360Agent antes de reportar warning de integridad por servicio detenido.
 
 Cambios v3.8:
 - Mantiene heartbeat, C2, self-healing de red, reporte de incidentes, hot-swap, Lazaro, logs rotativos y diagnostico local.
@@ -93,7 +97,7 @@ Si El PC Ya Tiene Un Agente Anterior:
 3. No usar reparadores antiguos ni scripts viejos para actualizar equipos sanos.
 
 Si aparece ERROR 5 Acceso denegado:
-1. Usar este kit SYSTEM-2026-05-09.2 o superior.
+1. Usar este kit SYSTEM-2026-05-10.1 o superior.
 2. No borrar manualmente C:\ProgramData\Enlace360\Agent si necesitas preservar evidencia.
 3. Si solo quieres recuperar el equipo, el instalador se encarga de resetear permisos con takeown/icacls antes de copiar.
 4. Si el error persiste despues de reiniciar, ejecutar Diagnosticar_Enlace360_SYSTEM.bat y enviar el ZIP.
@@ -154,6 +158,7 @@ Notas:
 - C2 vive dentro del agente principal; no depende de un poller auxiliar.
 - El servicio Windows Enlace360Agent es el mecanismo principal de arranque.
 - HealthCheck corre al inicio y cada 5 minutos como respaldo.
+- HealthCheck permite disparos manuales del verificador aunque haya una instancia reciente en curso.
 - Si falta Agente_Enlace360_Service.ps1, HealthCheck lo restaura desde agent_payload.cache.
 - Si falta la tarea principal, HealthCheck la recrea como SYSTEM.
 - Si faltan archivos, tareas o servicio, el agente reporta integrity_status/integrity_alert al dashboard.

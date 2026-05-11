@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VerifierVersion = "SYSTEM-2026-05-09.2"
+$VerifierVersion = "SYSTEM-2026-05-10.1"
 $PreferredLogFile = "C:\Enlace360_SYSTEM_verifier.log"
 $LogFile = $PreferredLogFile
 $TaskAgent = "Enlace360_Agent"
@@ -88,6 +88,21 @@ function Get-AgentProcess {
         ($_.Name -eq "powershell.exe" -or $_.Name -eq "pwsh.exe") -and
         $_.CommandLine -like "*Agente_Enlace360_Service.ps1*"
     })
+}
+
+function Start-HealthCheckDeterministic {
+    param([int]$IdleWaitSeconds = 20)
+
+    try {
+        Wait-Until -Label "healthcheck disponible para disparo manual" -TimeoutSeconds $IdleWaitSeconds -IntervalSeconds 1 -Condition {
+            $task = Get-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction SilentlyContinue
+            return ($task -and $task.State -ne "Running")
+        }
+    } catch {
+        Log "[WARN] HealthCheck seguia Running antes del disparo manual: $($_.Exception.Message)"
+    }
+
+    Start-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction Stop
 }
 
 function Read-AgentSupabase {
@@ -173,7 +188,7 @@ function Test-C2Roundtrip {
     $id = [string]$created
     if (-not $id) { throw "Supabase no retorno id de remote_commands" }
 
-    Start-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction SilentlyContinue
+    Start-HealthCheckDeterministic -IdleWaitSeconds 10
     Start-Sleep -Seconds 2
 
     Wait-Until -Label "C2 roundtrip $id" -TimeoutSeconds 150 -IntervalSeconds 5 -Condition {
@@ -236,6 +251,34 @@ function Wait-HeartbeatAdvance {
         return ($hb -gt $firstHeartbeat -or $uptime -ne $firstUptime)
     }
     return "antes=$($first.last_heartbeat) uptime=$firstUptime; despues=$($script:advancedRow.last_heartbeat) uptime=$($script:advancedRow.uptime)"
+}
+
+function Assert-NoFalseServiceIntegrityWarning {
+    param(
+        $Supabase,
+        [string]$KioskName,
+        [int]$TimeoutSeconds = 150
+    )
+
+    $startedAt = (Get-Date).ToUniversalTime().AddSeconds(-5)
+    $badAlert = "Enlace360Agent: status=Stopped"
+    $script:falseIntegrityRow = $null
+
+    Wait-Until -Label "integridad dashboard sin falso servicio detenido" -TimeoutSeconds $TimeoutSeconds -IntervalSeconds 10 -Condition {
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if (-not $svc) { throw "No existe servicio $ServiceName durante chequeo de integridad" }
+        if ($svc.Status -ne "Running") { throw "$ServiceName local no esta Running: $($svc.Status)" }
+
+        $script:falseIntegrityRow = Get-KioskRow -Supabase $Supabase -KioskName $KioskName
+        if (-not $script:falseIntegrityRow -or -not $script:falseIntegrityRow.integrity_checked_at) { return $false }
+
+        $checkedAt = ([datetime]$script:falseIntegrityRow.integrity_checked_at).ToUniversalTime()
+        $alert = [string]$script:falseIntegrityRow.integrity_alert
+        Log "Integridad observada=$($script:falseIntegrityRow.integrity_status); checked_at=$($script:falseIntegrityRow.integrity_checked_at); alert=$alert"
+        return ($checkedAt -ge $startedAt -and $alert -notlike "*$badAlert*")
+    }
+
+    return "integrity_status=$($script:falseIntegrityRow.integrity_status); alert=$($script:falseIntegrityRow.integrity_alert)"
 }
 
 function Write-Tail {
@@ -343,7 +386,7 @@ if ($TestHealthCheck) {
     Invoke-Check "HealthCheck recupera proceso muerto" {
         @(Get-AgentProcess) | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 4
-        Start-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction Stop
+        Start-HealthCheckDeterministic
         Wait-Until -Label "healthcheck relanza agente" -TimeoutSeconds 90 -Condition { @(Get-AgentProcess).Count -gt 0 }
         "OK"
     } | Out-Null
@@ -354,7 +397,7 @@ if ($TestHealthCheck) {
             @(Get-AgentProcess) | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
             [System.IO.File]::Copy($AgentPath, $backup, $true)
             Remove-Item -LiteralPath $AgentPath -Force
-            Start-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction Stop
+            Start-HealthCheckDeterministic
             Wait-Until -Label "healthcheck restaura archivo agente" -TimeoutSeconds 90 -Condition {
                 (Test-Path -LiteralPath $AgentPath -PathType Leaf) -and @(Get-AgentProcess).Count -gt 0
             }
@@ -370,12 +413,16 @@ if ($TestHealthCheck) {
     Invoke-Check "HealthCheck recrea tarea principal" {
         Stop-ScheduledTask -TaskName $TaskAgent -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $TaskAgent -Confirm:$false -ErrorAction SilentlyContinue
-        Start-ScheduledTask -TaskName $TaskHealthCheck -ErrorAction Stop
+        Start-HealthCheckDeterministic
         Wait-Until -Label "healthcheck recrea tarea principal" -TimeoutSeconds 90 -Condition {
             $task = Get-ScheduledTask -TaskName $TaskAgent -ErrorAction SilentlyContinue
             return ($task -and $task.Principal.UserId -eq "SYSTEM")
         }
         "OK"
+    } | Out-Null
+
+    Invoke-Check "Integridad sin falso servicio detenido" {
+        Assert-NoFalseServiceIntegrityWarning -Supabase $script:Supabase -KioskName ([string]$script:Config.KioskName) -TimeoutSeconds $ObserveSeconds
     } | Out-Null
 }
 

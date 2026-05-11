@@ -14,7 +14,7 @@ function notIncludes(unexpected, label = unexpected) {
 }
 
 includes('integrity_status text', 'kiosks integrity status column');
-includes('SYSTEM-2026-05-09.2', 'schema version');
+includes('SYSTEM-2026-05-10.1', 'schema version');
 includes('integrity_alert text', 'kiosks integrity alert column');
 includes('integrity_checked_at timestamp with time zone', 'kiosks integrity checked timestamp column');
 includes('integrity_details jsonb', 'kiosks integrity details column');
@@ -37,11 +37,13 @@ includes('agent_secret_hash IS NULL', 'legacy bridge only applies to unregistere
 includes('GRANT INSERT (', 'legacy heartbeat insert column grant');
 includes('GRANT UPDATE (', 'legacy heartbeat update column grant');
 includes('GRANT EXECUTE ON FUNCTION public.enlace360_enqueue_remote_command', 'dashboard RPC grant');
+includes('REVOKE ALL ON public.remote_commands FROM anon, authenticated', 'remote commands table blocked from direct anon/auth access');
+includes('GRANT EXECUTE ON FUNCTION public.enlace360_claim_remote_commands(text, integer) TO anon, authenticated', 'agent RPC grant');
 includes('CREATE INDEX IF NOT EXISTS idx_remote_commands_pending_kiosk', 'pending command index');
 includes('CREATE INDEX IF NOT EXISTS idx_network_events_kiosk_offline_desc', 'event history index');
-notIncludes('CREATE POLICY "Permitir insertar comandos remotos"', 'public remote command insert policy');
-notIncludes('CREATE POLICY "Permitir actualizar comandos remotos"', 'public remote command update policy');
-notIncludes('CREATE POLICY "Permitir leer comandos remotos"', 'public remote command read policy');
+notIncludes('CREATE POLICY "Permitir insertar comandos remotos"', 'direct remote command insert policy');
+notIncludes('CREATE POLICY "Permitir actualizar comandos remotos"', 'direct remote command update policy');
+notIncludes('CREATE POLICY "Permitir leer comandos remotos"', 'direct remote command read policy');
 notIncludes('FOR INSERT WITH CHECK (true)', 'open insert RLS policy');
 notIncludes('FOR UPDATE USING (true)', 'open update RLS policy');
 

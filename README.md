@@ -4,8 +4,8 @@ Repositorio del dashboard y del agente Windows Enlace360 para monitoreo de kiosc
 
 ## Version Operativa
 
-- Kit: `SYSTEM-2026-05-09.1`
-- Agente: `v3.8`
+- Kit: `SYSTEM-2026-05-10.1`
+- Agente: `v3.8.1`
 - Ruta Windows: `C:\ProgramData\Enlace360\Agent`
 - Tareas Windows esperadas:
   - `Enlace360_Agent`
@@ -14,7 +14,7 @@ Repositorio del dashboard y del agente Windows Enlace360 para monitoreo de kiosc
 El paquete cliente vigente esta en:
 
 ```text
-Enlace360_SYSTEM_20260503_v6/
+usb-kit-2026-05-09/
 ```
 
 ## Arquitectura Vigente
@@ -23,6 +23,7 @@ El agente principal `Agente_Enlace360_Service.ps1` corre como `NT AUTHORITY\SYST
 
 - heartbeat hacia Supabase
 - C2 real via RPC segura sobre `remote_commands`
+- integridad de servicio/tareas/archivos reportada al dashboard
 - reporte de eventos en `network_events`
 - self-healing de red
 - protocolo Lazaro con limite diario
@@ -32,7 +33,7 @@ El agente principal `Agente_Enlace360_Service.ps1` corre como `NT AUTHORITY\SYST
 
 ## Instalacion En Cliente
 
-Copiar al PC cliente el contenido completo de `Enlace360_SYSTEM_20260503_v6/` y ejecutar como Administrador:
+Copiar al PC cliente el contenido completo de `usb-kit-2026-05-09/` y ejecutar como Administrador:
 
 ```text
 Instalar_Enlace360_SYSTEM.bat
@@ -71,6 +72,7 @@ El verificador comprueba:
 - avance del contador/heartbeat
 - C2 roundtrip real
 - recuperacion por HealthCheck
+- recreacion deterministica de `Enlace360_Agent` si falta
 - cola `remote_commands` sin pendientes
 
 Log principal:
@@ -105,7 +107,7 @@ El dashboard envia un comando C2 que descarga:
 https://raw.githubusercontent.com/Enlace360/Monitoreo-de-red-/main/Agente_Enlace360_Service.ps1
 ```
 
-Por eso el archivo raiz `Agente_Enlace360_Service.ps1` debe mantenerse identico al agente del kit SYSTEM vigente. El comando tambien actualiza `agent_payload.cache` para que HealthCheck no restaure una version antigua.
+Por eso el archivo raiz `Agente_Enlace360_Service.ps1` debe mantenerse identico al agente del kit SYSTEM vigente. El comando tambien actualiza `agent_payload.cache` para que HealthCheck no restaure una version antigua. C2 no debe acceder directo a la tabla `remote_commands`; debe pasar por las funciones RPC del esquema vigente.
 
 ## No Usar En Clientes
 

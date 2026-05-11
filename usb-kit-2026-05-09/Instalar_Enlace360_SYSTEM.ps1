@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$InstallerVersion = "SYSTEM-2026-05-09.2"
+$InstallerVersion = "SYSTEM-2026-05-10.1"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PreferredLogFile = "C:\Enlace360_SYSTEM_installer.log"
 $LogFile = $PreferredLogFile
@@ -420,7 +420,7 @@ function Register-SystemTasks {
         -StartWhenAvailable `
         -DontStopOnIdleEnd `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
-        -MultipleInstances IgnoreNew
+        -MultipleInstances Parallel
     Register-ScheduledTask -TaskName $TaskHealthCheck -Action $healthAction -Trigger @(
         New-ScheduledTaskTrigger -AtStartup
         New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)

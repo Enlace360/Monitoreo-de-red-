@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.8"
+$AgentVersion = "v3.8.1"
 
 $CheckIntervalSecs = 30
 $HttpTimeoutSecs = 10
@@ -355,10 +355,27 @@ Function Get-TaskIntegrityCheck {
     return New-IntegrityCheck -Name $Name -Kind "task" -Ok $false -Severity $Severity -Details "missing scheduled_task=$Name"
 }
 
+Function Confirm-ServiceRunningStable {
+    param(
+        [string]$Name,
+        [int]$Retries = 3,
+        [int]$DelaySeconds = 2
+    )
+
+    $svc = $null
+    for ($i = 0; $i -lt $Retries; $i++) {
+        $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq "Running") { return $svc }
+        if ($i -lt ($Retries - 1)) { Start-Sleep -Seconds $DelaySeconds }
+    }
+
+    return $svc
+}
+
 Function Get-ServiceIntegrityCheck {
     param([string]$Name)
 
-    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    $svc = Confirm-ServiceRunningStable -Name $Name
     if ($svc) {
         $severity = if ($svc.Status -eq "Running") { "ok" } else { "warning" }
         $svcInfo = Get-CimInstance Win32_Service -Filter ("Name='{0}'" -f $Name) -ErrorAction SilentlyContinue
