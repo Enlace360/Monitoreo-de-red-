@@ -21,13 +21,16 @@ function notIncludes(unexpected, detail = unexpected) {
   assert(!source.includes(unexpected), `${label} must not include: ${detail}`);
 }
 
-includes('$AgentVersion = "v3.8.1"', 'agent v3.8.1');
+includes('$AgentVersion = "v3.8.2"', 'agent v3.8.2');
 includes('$SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"', 'current Supabase URL');
 includes('$HttpTimeoutSecs = 10', 'bounded HTTP timeout');
 includes('$AgentSecret', 'agent has per-install secret');
 includes('X-Enlace360-Agent-Secret', 'agent sends secret header to Supabase RPC');
 includes('Function Get-Sha256Hex', 'agent hashes local secret for registration');
 includes('Global\\Enlace360AgentDaemon', 'single instance mutex');
+includes('Switch-ToServicePrimaryIfNeeded', 'task-launched agent hands off to service primary');
+includes('Entregando control a Enlace360Agent', 'agent logs service handoff');
+includes("Restart-Service -Name 'Enlace360Agent'", 'self update restarts service primary');
 includes('$IntegrityFile = Join-Path $LogDir "integrity_state.json"', 'local integrity state file');
 includes('Function Invoke-EnlaceRestJson', 'hardened REST helper');
 includes('Start-Job -ScriptBlock', 'killable jobs for REST/C2 isolation');

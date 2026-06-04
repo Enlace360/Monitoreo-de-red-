@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$InstallerVersion = "SYSTEM-2026-05-10.1"
+$InstallerVersion = "SYSTEM-2026-06-04.1"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PreferredLogFile = "C:\Enlace360_SYSTEM_installer.log"
 $LogFile = $PreferredLogFile
@@ -381,7 +381,7 @@ function Write-TaskManifest {
             [ordered]@{
                 name = $TaskAgent
                 user = "SYSTEM"
-                triggers = @("AtStartup", "AtLogOn")
+                triggers = @("ManualFallback")
                 action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$AgentPath`""
             },
             [ordered]@{
@@ -408,10 +408,7 @@ function Register-SystemTasks {
         -RestartCount 999 `
         -RestartInterval (New-TimeSpan -Minutes 1) `
         -MultipleInstances IgnoreNew
-    Register-ScheduledTask -TaskName $TaskAgent -Action $agentAction -Trigger @(
-        New-ScheduledTaskTrigger -AtStartup
-        New-ScheduledTaskTrigger -AtLogOn
-    ) -Principal $principal -Settings $agentSettings -Description "Enlace360 agent heartbeat y C2 como SYSTEM" -Force | Out-Null
+    Register-ScheduledTask -TaskName $TaskAgent -Action $agentAction -Principal $principal -Settings $agentSettings -Description "Enlace360 agent fallback manual como SYSTEM" -Force | Out-Null
 
     $healthAction = New-SystemPowerShellAction -ScriptPath $HealthCheckPath
     $healthSettings = New-ScheduledTaskSettingsSet `
@@ -571,10 +568,7 @@ function Ensure-AgentTask {
     Add-HealthLog "Tarea $TaskName no existe. Registrando nuevamente."
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Days 0) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
-    Register-ScheduledTask -TaskName $TaskName -Action (New-SystemPowerShellActionLocal $AgentPath) -Trigger @(
-        New-ScheduledTaskTrigger -AtStartup
-        New-ScheduledTaskTrigger -AtLogOn
-    ) -Principal $principal -Settings $settings -Description "Enlace360 agent heartbeat y C2 como SYSTEM" -Force | Out-Null
+    Register-ScheduledTask -TaskName $TaskName -Action (New-SystemPowerShellActionLocal $AgentPath) -Principal $principal -Settings $settings -Description "Enlace360 agent fallback manual como SYSTEM" -Force | Out-Null
 }
 function Ensure-AgentService {
     if (-not (Test-Path -LiteralPath $ServiceExe -PathType Leaf) -or -not (Test-Path -LiteralPath $ServiceXml -PathType Leaf)) {

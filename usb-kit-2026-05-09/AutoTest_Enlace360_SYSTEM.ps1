@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$AutoTestVersion = "SYSTEM-2026-05-10.1"
+$AutoTestVersion = "SYSTEM-2026-06-04.1"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LogFile = "C:\Enlace360_SYSTEM_autotest.log"
 $ServiceName = "Enlace360Agent"

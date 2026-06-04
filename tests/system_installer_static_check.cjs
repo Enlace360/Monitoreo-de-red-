@@ -68,8 +68,8 @@ for (const line of checksumLines) {
   assert.strictEqual(actualHash, expectedHash, `checksum mismatch for ${fileName}`);
 }
 
-assertIncludes(readme, 'Version kit: SYSTEM-2026-05-10.1', 'readme version');
-assertIncludes(readme, 'Agente incluido: v3.8.1', 'readme agent version');
+assertIncludes(readme, 'Version kit: SYSTEM-2026-06-04.1', 'readme version');
+assertIncludes(readme, 'Agente incluido: v3.8.2', 'readme agent version');
 assertIncludes(readme, 'C:\\ProgramData\\Enlace360\\Agent', 'readme install path');
 assertIncludes(readme, 'Enlace360_Agent', 'readme agent task');
 assertIncludes(readme, 'Enlace360_HealthCheck', 'readme health task');
@@ -94,7 +94,7 @@ assertIncludes(installerBat, 'set "INSTALL_DIR=C:\\ProgramData\\Enlace360\\Agent
 assertIncludes(installerBat, 'set /p "CLIENT_NAME=', 'installer wrapper prompts client');
 assertIncludes(installerBat, '-ClientName "%CLIENT_NAME%" -Location "%LOCATION%" -KioskName "%KIOSK_NAME%"', 'installer wrapper passes config');
 
-assertIncludes(installer, '$InstallerVersion = "SYSTEM-2026-05-10.1"', 'installer version');
+assertIncludes(installer, '$InstallerVersion = "SYSTEM-2026-06-04.1"', 'installer version');
 assertIncludes(installer, '[string]$AgentSecret = ""', 'installer accepts optional agent secret');
 assertIncludes(installer, 'function New-AgentSecret', 'installer generates agent secret');
 assertIncludes(installer, 'AgentSecret = $AgentSecret', 'installer writes agent secret to config');
@@ -142,12 +142,14 @@ assertIncludes(installer, 'Ensure-AgentService', 'healthcheck ensures service');
 assertIncludes(installer, 'Register-ScheduledTask -TaskName $TaskAgent', 'installer registers agent task');
 assertIncludes(installer, 'Register-ScheduledTask -TaskName $TaskHealthCheck', 'installer registers healthcheck task');
 assertIncludes(installer, 'New-ScheduledTaskPrincipal -UserId "SYSTEM"', 'installer runs as SYSTEM');
-assertIncludes(installer, 'New-ScheduledTaskTrigger -AtStartup', 'installer startup trigger');
-assertIncludes(installer, 'New-ScheduledTaskTrigger -AtLogOn', 'installer logon trigger');
+assertIncludes(installer, 'triggers = @("ManualFallback")', 'installer documents agent task as manual fallback');
+assertIncludes(installer, 'New-ScheduledTaskTrigger -AtStartup', 'installer healthcheck/postreboot startup trigger');
+assertNotIncludes(installer, 'New-ScheduledTaskTrigger -AtLogOn', 'agent task must not auto-start at logon');
+assertNotIncludes(installer, 'triggers = @("AtStartup", "AtLogOn")', 'agent manifest must not describe automatic triggers');
 assertIncludes(installer, 'RepetitionInterval (New-TimeSpan -Minutes 5)', 'installer healthcheck repeats every five minutes');
-assertMatches(installer, /\$agentSettings = New-ScheduledTaskSettingsSet[\s\S]*?-MultipleInstances IgnoreNew[\s\S]*?Register-ScheduledTask -TaskName \$TaskAgent/, 'agent task prevents duplicate agent loops');
+assertMatches(installer, /\$agentSettings = New-ScheduledTaskSettingsSet[\s\S]*?-MultipleInstances IgnoreNew[\s\S]*?Register-ScheduledTask -TaskName \$TaskAgent -Action \$agentAction -Principal/, 'agent task is manual fallback without automatic triggers');
 assertMatches(installer, /\$healthSettings = New-ScheduledTaskSettingsSet[\s\S]*?-MultipleInstances Parallel[\s\S]*?Register-ScheduledTask -TaskName \$TaskHealthCheck/, 'healthcheck task allows deterministic verifier trigger');
-assertMatches(installer, /function Ensure-AgentTask[\s\S]*?New-ScheduledTaskSettingsSet[\s\S]*?-MultipleInstances IgnoreNew[\s\S]*?Register-ScheduledTask -TaskName \$TaskName/, 'healthcheck restores agent task with duplicate protection');
+assertMatches(installer, /function Ensure-AgentTask[\s\S]*?New-ScheduledTaskSettingsSet[\s\S]*?-MultipleInstances IgnoreNew[\s\S]*?Register-ScheduledTask -TaskName \$TaskName -Action \(New-SystemPowerShellActionLocal \$AgentPath\) -Principal/, 'healthcheck restores manual fallback agent task with duplicate protection');
 assertIncludes(installer, 'install_manifest.json', 'installer writes manifest');
 assertIncludes(installer, '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VerifierPath', 'installer runs quick verifier');
 assertNotIncludes(installer, '-EncodedCommand', 'installer encoded commands');
@@ -155,7 +157,7 @@ assertNotIncludes(installer, 'Enlace360_C2_Poller.ps1', 'installer external c2 p
 
 assertIncludes(verifierBat, 'Verb RunAs', 'verifier wrapper admin elevation');
 assertIncludes(verifierBat, '-ObserveSeconds %OBSERVE_SECONDS% -TestHealthCheck', 'verifier wrapper tests healthcheck');
-assertIncludes(verifier, '$VerifierVersion = "SYSTEM-2026-05-10.1"', 'verifier version');
+assertIncludes(verifier, '$VerifierVersion = "SYSTEM-2026-06-04.1"', 'verifier version');
 assertIncludes(verifier, 'Enlace360Agent', 'verifier checks service');
 assertIncludes(verifier, 'integrity_status', 'verifier reads integrity fields');
 assertIncludes(verifier, 'ENLACE360_C2_ADMIN_SECRET', 'verifier reads C2 admin secret from env');
@@ -220,7 +222,7 @@ assertIncludes(autoTestCodexBat, 'AUTO_REBOOT', 'autotest codex wrapper supports
 assertIncludes(autoTestCodexBat, 'SKIP_INSTALL', 'autotest codex wrapper supports skip install flag');
 assertIncludes(autoTestCodexBat, 'POST_REBOOT', 'autotest codex wrapper supports post reboot flag');
 assertIncludes(autoTestCodexBat, '-ClientName "%CLIENT_NAME%" -Location "%LOCATION%" -KioskName "%KIOSK_NAME%"', 'autotest codex wrapper passes config');
-assertIncludes(autoTest, '$AutoTestVersion = "SYSTEM-2026-05-10.1"', 'autotest version');
+assertIncludes(autoTest, '$AutoTestVersion = "SYSTEM-2026-06-04.1"', 'autotest version');
 assertIncludes(autoTest, 'Assert-PowerShellSyntax', 'autotest parses scripts before execution');
 assertIncludes(autoTest, '[System.Management.Automation.Language.Parser]::ParseFile', 'autotest uses parser API');
 assertIncludes(autoTest, 'Invoke-Installer', 'autotest invokes installer directly');
@@ -236,7 +238,8 @@ assertNotIncludes(autoTest, '-EncodedCommand', 'autotest encoded commands');
 
 assertIncludes(agent, 'Function Check-RemoteCommands', 'agent integrated c2');
 assertIncludes(agent, 'Function Get-AgentIntegrity', 'agent reports integrity');
-assertIncludes(agent, '$AgentVersion = "v3.8.1"', 'agent version');
+assertIncludes(agent, '$AgentVersion = "v3.8.2"', 'agent version');
+assertIncludes(agent, 'Switch-ToServicePrimaryIfNeeded', 'agent hands off old task-triggered launches to service');
 assertIncludes(agent, 'Confirm-ServiceRunningStable', 'agent rechecks service before integrity warning');
 assertIncludes(agent, '/rest/v1/rpc/enlace360_claim_remote_commands', 'agent claims c2 via rpc');
 assertIncludes(agent, '/rest/v1/rpc/enlace360_complete_remote_command', 'agent completes c2 via rpc');

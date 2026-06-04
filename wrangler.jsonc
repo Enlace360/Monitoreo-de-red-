@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "monitoreoredes",
+  "compatibility_date": "2026-06-04",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "dashboard/dist"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}

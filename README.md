@@ -4,8 +4,8 @@ Repositorio del dashboard y del agente Windows Enlace360 para monitoreo de kiosc
 
 ## Version Operativa
 
-- Kit: `SYSTEM-2026-05-10.1`
-- Agente: `v3.8.1`
+- Kit: `SYSTEM-2026-06-04.1`
+- Agente: `v3.8.2`
 - Ruta Windows: `C:\ProgramData\Enlace360\Agent`
 - Tareas Windows esperadas:
   - `Enlace360_Agent`
@@ -19,7 +19,7 @@ usb-kit-2026-05-09/
 
 ## Arquitectura Vigente
 
-El agente principal `Agente_Enlace360_Service.ps1` corre como `NT AUTHORITY\SYSTEM` y contiene:
+El agente principal `Agente_Enlace360_Service.ps1` corre como servicio Windows `Enlace360Agent` bajo `NT AUTHORITY\SYSTEM` y contiene:
 
 - heartbeat hacia Supabase
 - C2 real via RPC segura sobre `remote_commands`
@@ -29,7 +29,9 @@ El agente principal `Agente_Enlace360_Service.ps1` corre como `NT AUTHORITY\SYST
 - protocolo Lazaro con limite diario
 - hot-swap por hash del propio archivo
 
-`Enlace360_HealthCheck` se instala como tarea separada al inicio de Windows y cada 5 minutos. Su responsabilidad es restaurar el agente desde `agent_payload.cache`, recrear la tarea principal si falta y arrancar el proceso si muere.
+`Enlace360_HealthCheck` se instala como tarea separada al inicio de Windows y cada 5 minutos. Su responsabilidad es restaurar el agente desde `agent_payload.cache`, recrear la tarea principal de respaldo si falta y arrancar el proceso si el servicio no logra dejarlo vivo.
+
+`Enlace360_Agent` existe como tarea SYSTEM de respaldo manual. No debe tener triggers automaticos de arranque/logon, para que no compita con el servicio por el mutex del agente.
 
 ## Instalacion En Cliente
 

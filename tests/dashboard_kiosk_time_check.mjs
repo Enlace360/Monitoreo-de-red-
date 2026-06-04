@@ -28,8 +28,8 @@ assert.equal(
 )
 
 assert.equal(
-  getAgentVersionFromUptime('0 d, 1 h, 45 m | v3.8.1'),
-  'v3.8.1',
+  getAgentVersionFromUptime('0 d, 1 h, 45 m | v3.8.2'),
+  'v3.8.2',
   'agent version should still be parsed from the legacy uptime field'
 )
 

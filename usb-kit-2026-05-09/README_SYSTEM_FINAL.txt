@@ -1,11 +1,16 @@
 ENLACE360 - KIT SYSTEM
-Version kit: SYSTEM-2026-05-10.1
-Agente incluido: v3.8.1
+Version kit: SYSTEM-2026-06-04.1
+Agente incluido: v3.8.2
 
 Objetivo:
 Instalar el agente en C:\ProgramData\Enlace360\Agent como servicio Windows
 Enlace360Agent, con tareas SYSTEM solo como respaldo, cache local de recuperacion,
 diagnostico forense e integridad visible en el dashboard.
+
+Cambios v3.8.2:
+- Deja Enlace360Agent como arranque primario del agente.
+- Convierte Enlace360_Agent en tarea SYSTEM de respaldo manual, sin triggers automaticos que compitan con el servicio.
+- Si un equipo viejo todavia lanza la tarea principal al boot/logon, el agente entrega el control al servicio y sale para evitar mutex duplicado.
 
 Cambios v3.8.1:
 - Hace deterministica la prueba de HealthCheck cuando el verificador dispara Enlace360_HealthCheck manualmente.
@@ -97,7 +102,7 @@ Si El PC Ya Tiene Un Agente Anterior:
 3. No usar reparadores antiguos ni scripts viejos para actualizar equipos sanos.
 
 Si aparece ERROR 5 Acceso denegado:
-1. Usar este kit SYSTEM-2026-05-10.1 o superior.
+1. Usar este kit SYSTEM-2026-06-04.1 o superior.
 2. No borrar manualmente C:\ProgramData\Enlace360\Agent si necesitas preservar evidencia.
 3. Si solo quieres recuperar el equipo, el instalador se encarga de resetear permisos con takeown/icacls antes de copiar.
 4. Si el error persiste despues de reiniciar, ejecutar Diagnosticar_Enlace360_SYSTEM.bat y enviar el ZIP.
@@ -158,6 +163,7 @@ Notas:
 - C2 vive dentro del agente principal; no depende de un poller auxiliar.
 - El servicio Windows Enlace360Agent es el mecanismo principal de arranque.
 - HealthCheck corre al inicio y cada 5 minutos como respaldo.
+- Enlace360_Agent queda como fallback manual; el servicio Enlace360Agent es el arranque primario.
 - HealthCheck permite disparos manuales del verificador aunque haya una instancia reciente en curso.
 - Si falta Agente_Enlace360_Service.ps1, HealthCheck lo restaura desde agent_payload.cache.
 - Si falta la tarea principal, HealthCheck la recrea como SYSTEM.

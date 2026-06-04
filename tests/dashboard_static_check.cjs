@@ -7,6 +7,7 @@ const app = fs.readFileSync(path.join(root, 'dashboard', 'src', 'App.jsx'), 'utf
 const css = fs.readFileSync(path.join(root, 'dashboard', 'src', 'index.css'), 'utf8');
 const supabaseClient = fs.readFileSync(path.join(root, 'dashboard', 'src', 'supabaseClient.js'), 'utf8');
 const kioskTime = fs.readFileSync(path.join(root, 'dashboard', 'src', 'kioskTime.js'), 'utf8');
+const wrangler = fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8');
 
 function includes(expected, label = expected) {
   assert(app.includes(expected), `dashboard must include: ${label}`);
@@ -95,5 +96,8 @@ assert(supabaseClient.includes('VITE_SUPABASE_URL'), 'dashboard must allow Supab
 assert(supabaseClient.includes('VITE_SUPABASE_ANON_KEY'), 'dashboard must allow Supabase anon key override');
 assert(!supabaseClient.includes('https://TU_PROYECTO.supabase.co'), 'dashboard must not ship placeholder Supabase URL');
 assert(!supabaseClient.includes('TU_LLAVE_ANONIMA'), 'dashboard must not ship placeholder Supabase anon key');
+assert(wrangler.includes('"assets"'), 'wrangler config must define static assets');
+assert(wrangler.includes('"directory": "dashboard/dist"'), 'wrangler assets must point to built dashboard output');
+assert(!wrangler.includes('"directory": "dashboard"'), 'wrangler assets must not publish dashboard source tree');
 
 console.log('Dashboard static checks passed.');

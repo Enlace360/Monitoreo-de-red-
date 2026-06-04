@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$VerifierVersion = "SYSTEM-2026-05-10.1"
+$VerifierVersion = "SYSTEM-2026-06-04.1"
 $PreferredLogFile = "C:\Enlace360_SYSTEM_verifier.log"
 $LogFile = $PreferredLogFile
 $TaskAgent = "Enlace360_Agent"
@@ -355,7 +355,12 @@ if (-not (Invoke-Check "Servicio Windows Enlace360Agent" {
 Invoke-Check "Proceso agente vivo" {
     $proc = @(Get-AgentProcess)
     if ($proc.Count -lt 1) {
-        Start-ScheduledTask -TaskName $TaskAgent -ErrorAction Stop
+        Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 8
+        $proc = @(Get-AgentProcess)
+        if ($proc.Count -lt 1) {
+            Start-ScheduledTask -TaskName $TaskAgent -ErrorAction Stop
+        }
         Wait-Until -Label "proceso agente vivo" -TimeoutSeconds 80 -Condition { @(Get-AgentProcess).Count -gt 0 }
         $proc = @(Get-AgentProcess)
     }

@@ -1,16 +1,52 @@
-# React + Vite
+# Enlace360 Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Dashboard React/Vite publicado en Cloudflare Pages para monitoreo de kioscos Enlace360.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React 19
+- Vite 8
+- Supabase JS
+- Lucide React
 
-## React Compiler
+## Desarrollo Local
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+npm run dev
+```
 
-## Expanding the ESLint configuration
+El cliente Supabase usa valores por defecto del proyecto productivo y permite override con:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+```
+
+## Checks
+
+Desde la raiz del repo:
+
+```bash
+node tests/dashboard_kiosk_time_check.mjs
+node tests/dashboard_static_check.cjs
+```
+
+Desde `dashboard/`:
+
+```bash
+npm run lint
+npm run build
+```
+
+## Publicacion
+
+El build esperado queda en:
+
+```text
+dashboard/dist/
+```
+
+Cloudflare Pages debe publicar el resultado de `npm run build` desde `dashboard/`, o usar la configuracion root `wrangler.jsonc` con `assets.directory = "dashboard/dist"`.
+
+El contador visible de cada tarjeta muestra tiempo de sesion online (`Online ...`). El uptime de Windows se conserva como metadata secundaria en tooltip.

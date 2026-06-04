@@ -14,7 +14,7 @@ function notIncludes(unexpected, label = unexpected) {
 }
 
 includes('integrity_status text', 'kiosks integrity status column');
-includes('SYSTEM-2026-05-10.1', 'schema version');
+includes('SYSTEM-2026-06-04.1', 'schema version');
 includes('integrity_alert text', 'kiosks integrity alert column');
 includes('integrity_checked_at timestamp with time zone', 'kiosks integrity checked timestamp column');
 includes('integrity_details jsonb', 'kiosks integrity details column');

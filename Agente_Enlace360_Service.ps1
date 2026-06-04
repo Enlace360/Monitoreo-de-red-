@@ -16,7 +16,7 @@
 # ============================================================================
 $SupabaseUrl = "https://zhvykvpixpkjegfxgwer.supabase.co"
 $SupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodnlrdnBpeHBramVnZnhnd2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI3NTksImV4cCI6MjA5MzA1ODc1OX0.kE0BA4IyldzvX4XfhF3bHAARTRDkAlqSgAlM6Am5YdI"
-$AgentVersion = "v3.8.1"
+$AgentVersion = "v3.8.2"
 
 $CheckIntervalSecs = 30
 $HttpTimeoutSecs = 10
@@ -74,6 +74,43 @@ try {
 } catch {
     Write-Log "[WARNING] No se pudo crear mutex de instancia unica: $($_.Exception.Message)"
 }
+
+Function Test-RunningFromServiceWrapper {
+    try {
+        $current = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID) -ErrorAction Stop
+        if (-not $current -or -not $current.ParentProcessId) { return $false }
+        $parent = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $current.ParentProcessId) -ErrorAction Stop
+        return ($parent -and ($parent.Name -eq "Enlace360Agent.exe" -or [string]$parent.CommandLine -like "*Enlace360Agent.exe*"))
+    } catch {
+        return $false
+    }
+}
+
+Function Switch-ToServicePrimaryIfNeeded {
+    if (Test-RunningFromServiceWrapper) { return }
+
+    $svc = Get-CimInstance Win32_Service -Filter ("Name='{0}'" -f $ServiceName) -ErrorAction SilentlyContinue
+    if (-not $svc -or $svc.StartMode -ne "Auto" -or $svc.State -eq "Running") { return }
+
+    $handoffCmd = @"
+Start-Sleep -Seconds 3
+try { Start-Service -Name '$ServiceName' -ErrorAction SilentlyContinue } catch {}
+Start-Sleep -Seconds 10
+`$proc = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    (`$_.Name -eq 'powershell.exe' -or `$_.Name -eq 'pwsh.exe') -and
+    `$_.CommandLine -like '*Agente_Enlace360_Service.ps1*'
+})
+if (`$proc.Count -lt 1) {
+    Start-ScheduledTask -TaskName '$TaskAgent' -ErrorAction SilentlyContinue
+}
+"@ -replace "\r?\n", "; "
+
+    Write-Log "[INFO] Agente iniciado fuera del servicio. Entregando control a Enlace360Agent para evitar mutex duplicado."
+    Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command `"$handoffCmd`"" -ErrorAction SilentlyContinue
+    exit 0
+}
+
+Switch-ToServicePrimaryIfNeeded
 
 Function Invoke-EnlaceRestJson {
     param(
@@ -821,8 +858,8 @@ Function Check-SelfUpdate {
         if ($currentHash -ne $StartupHash) {
             Write-Log "[UPDATE] Archivo del agente modificado (Hash cambio de $StartupHash a $currentHash). Aplicando hot-swap..."
             Update-KioskStatus -Status "online"
-            $restartCmd = "Start-Sleep -Seconds 3; Stop-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Start-ScheduledTask -TaskName 'Enlace360_Agent'"
-            Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$restartCmd`""
+            $restartCmd = "Start-Sleep -Seconds 3; Stop-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue; try { Restart-Service -Name 'Enlace360Agent' -Force -ErrorAction Stop } catch { Start-Service -Name 'Enlace360Agent' -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 10; `$proc = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { (`$_.Name -eq 'powershell.exe' -or `$_.Name -eq 'pwsh.exe') -and `$_.CommandLine -like '*Agente_Enlace360_Service.ps1*' }); if (`$proc.Count -lt 1) { Start-ScheduledTask -TaskName 'Enlace360_Agent' -ErrorAction SilentlyContinue }"
+            Start-Process powershell.exe -ArgumentList "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command `"$restartCmd`""
             Write-Log "[UPDATE] Proceso de reinicio lanzado. Cerrando version antigua..."
             Exit
         }
